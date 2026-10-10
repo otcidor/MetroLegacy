@@ -91,3 +91,12 @@
 "retry" = "Retry";
 "load_more" = "Load more";
 "not_available" = "Not available";
+"play_next" = "Play next";
+"add_to_queue" = "Add to queue";
+"start_radio" = "Start radio";
+"go_to_artist" = "Go to artist";
+"go_to_album" = "Go to album";
+"copy_link" = "Copy link";
+"play_all" = "Play";
+"shuffle_all" = "Shuffle";
+

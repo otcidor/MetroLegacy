@@ -91,3 +91,12 @@
 "retry" = "Reintentar";
 "load_more" = "Cargar más";
 "not_available" = "No disponible";
+"play_next" = "Reproducir a continuación";
+"add_to_queue" = "Añadir a la cola";
+"start_radio" = "Iniciar radio";
+"go_to_artist" = "Ir al artista";
+"go_to_album" = "Ir al álbum";
+"copy_link" = "Copiar enlace";
+"play_all" = "Reproducir";
+"shuffle_all" = "Aleatorio";
+
