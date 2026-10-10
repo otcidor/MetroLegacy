@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>ml</title><script>
+/*
+ * MetroLegacy BotGuard client (ES5, UIWebView-compatible).
+ * Callback-based port of Metrolist's po_token.html: no fetch, no async/await.
+ * Networking (Create / GenerateIT) is done natively; this page only runs
+ * the BotGuard VM and mints tokens. Communication with native code goes
+ * through mlbridge:// navigation events.
+ */
+
+/* ---- minimal Promise polyfill (iOS 6 WebKit has none) ---- */
+if (typeof Promise === 'undefined' || !Promise) {
+  (function () {
+    function Promise(fn) {
+      var self = this;
+      this.state = 'pending';
+      this.value = null;
+      this.cbs = [];
+      function resolve(v) {
+        if (self.state !== 'pending') return;
+        if (v && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function') {
+          v.then(resolve, reject);
+          return;
+        }
+        self.state = 'fulfilled';
+        self.value = v;
+        flush();
+      }
+      function reject(e) {
+        if (self.state !== 'pending') return;
+        self.state = 'rejected';
+        self.value = e;
+        flush();
+      }
+      function flush() {
+        var cbs = self.cbs, i;
+        self.cbs = [];
+        for (i = 0; i < cbs.length; i++) {
+          var cb = cbs[i];
+          setTimeout(function (cb) {
+            return function () {
+              if (self.state === 'fulfilled' && cb.onFulfilled) cb.onFulfilled(self.value);
+              if (self.state === 'rejected' && cb.onRejected) cb.onRejected(self.value);
+            };
+          }(cb), 0);
+        }
+      }
+      this.then = function (onFulfilled, onRejected) {
+        var d = new Promise(function () {});
+        this.cbs.push({
+          onFulfilled: function (v) { try { d.resolve2(onFulfilled ? onFulfilled(v) : v); } catch (e) { d.reject2(e); } },
+          onRejected: function (e) { if (onRejected) { try { d.resolve2(onRejected(e)); } catch (e2) { d.reject2(e2); } } else d.reject2(e); }
+        });
+        return d;
+      };
+      this.resolve2 = resolve;
+      this.reject2 = reject;
+      try { fn(resolve, reject); } catch (e) { reject(e); }
+    }
+    Promise.resolve = function (v) { return new Promise(function (res) { res(v); }); };
+    Promise.reject = function (e) { return new Promise(function (res, rej) { rej(e); }); };
+    window.Promise = Promise;
+  })();
+}
+
+/* ---- native bridge ---- */
+function __mlSend(obj) {
+  try {
+    var s = JSON.stringify(obj);
+    location.href = 'mlbridge://' + encodeURIComponent(s);
+  } catch (e) {}
+}
+
+/* ---- base64 helpers (YouTube variant) ---- */
+function __mlB64ToBytes(b64) {
+  var mod = b64;
+  mod = mod.split('-').join('+');
+  mod = mod.split('_').join('/');
+  mod = mod.split('.').join('=');
+  var bin = atob(mod);
+  var u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+function __mlU8ToB64(u8) {
+  var bin = '';
+  for (var i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+  var b = btoa(bin);
+  b = b.split('+').join('-');
+  b = b.split('/').join('_');
+  return b;
+}
+function __mlStrToU8(s) {
+  var u8 = new Uint8Array(s.length);
+  for (var i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i) & 255;
+  return u8;
+}
+
+/* ---- BotGuard state ---- */
+var bgVm = null;
+var bgFunctions = null;
+var bgSignalOutput = null;
+var bgMinter = null;
+
+/* Runs the obfuscated BotGuard interpreter JS (defines window[globalName]). */
+function __mlEvalInterpreter(code) {
+  try {
+    var fn = new Function(code);
+    fn();
+    return 'ok';
+  } catch (e) {
+    return 'err:' + e.message;
+  }
+}
+
+/* Loads the program into the VM and takes the attestation snapshot.
+ * Emits mlbridge events: vmFunctions | snapshot | error */
+function __mlRunBotGuard(globalName, program) {
+  try {
+    bgVm = window[globalName];
+    if (!bgVm) {
+      __mlSend({ event: 'error', stage: 'vm', message: 'VM not found: ' + globalName });
+      return 'started';
+    }
+    bgSignalOutput = [];
+    var vmFunctionsCallback = function (asyncSnapshotFunction) {
+      bgFunctions = { asyncSnapshotFunction: asyncSnapshotFunction };
+    };
+    bgVm.a(program, vmFunctionsCallback, true, undefined, function () {}, [[], []]);
+
+    var attempts = 0;
+    var timer = setInterval(function () {
+      attempts++;
+      if (bgFunctions && bgFunctions.asyncSnapshotFunction) {
+        clearInterval(timer);
+        bgFunctions.asyncSnapshotFunction(function (response) {
+          __mlSend({ event: 'snapshot', response: response });
+        }, [undefined, undefined, bgSignalOutput, undefined]);
+      } else if (attempts >= 5000) {
+        clearInterval(timer);
+        __mlSend({ event: 'error', stage: 'vmFunctions', message: 'timeout waiting for snapshot function' });
+      }
+    }, 2);
+    return 'started';
+  } catch (e) {
+    __mlSend({ event: 'error', stage: 'runBotGuard', message: String(e && e.message) });
+    return 'err:' + e.message;
+  }
+}
+
+/* Creates the minter callback from webPoSignalOutput + integrity token.
+ * Emits minterReady | error */
+function __mlCreateMinter(integrityTokenB64) {
+  try {
+    if (!bgSignalOutput || bgSignalOutput.length === 0) {
+      __mlSend({ event: 'error', stage: 'minter', message: 'webPoSignalOutput empty' });
+      return 'err:no signals';
+    }
+    var getMinter = bgSignalOutput[0];
+    if (typeof getMinter !== 'function') {
+      __mlSend({ event: 'error', stage: 'minter', message: 'signalOutput[0] not a function: ' + typeof getMinter });
+      return 'err:bad signals';
+    }
+    var bytes = __mlB64ToBytes(integrityTokenB64);
+    var done = function (cb) {
+      bgMinter = cb;
+      __mlSend({ event: 'minterReady' });
+    };
+    var fail = function (e) {
+      __mlSend({ event: 'error', stage: 'getMinter', message: String(e && e.message) });
+    };
+    var result = getMinter(bytes);
+    if (result && typeof result.then === 'function') result.then(done, fail);
+    else done(result);
+    return 'ok';
+  } catch (e) {
+    __mlSend({ event: 'error', stage: 'createMinter', message: String(e && e.message) });
+    return 'err:' + e.message;
+  }
+}
+
+/* Mints a poToken for the given identifier (videoId or visitorData).
+ * Emits token | error */
+function __mlMint(identifier) {
+  try {
+    if (!bgMinter) {
+      __mlSend({ event: 'error', stage: 'mint', message: 'minter not initialized' });
+      return 'err:no minter';
+    }
+    var u8 = __mlStrToU8(identifier);
+    var done = function (tok) {
+      try {
+        __mlSend({ event: 'token', token: __mlU8ToB64(tok) });
+      } catch (e) {
+        __mlSend({ event: 'error', stage: 'tokenEncode', message: String(e && e.message) });
+      }
+    };
+    var fail = function (e) {
+      __mlSend({ event: 'error', stage: 'mint', message: String(e && e.message) });
+    };
+    var result = bgMinter(u8);
+    if (result && typeof result.then === 'function') result.then(done, fail);
+    else done(result);
+    return 'ok';
+  } catch (e) {
+    __mlSend({ event: 'error', stage: 'mint', message: String(e && e.message) });
+    return 'err:' + e.message;
+  }
+}
+
+__mlSend({ event: 'pageReady' });
+</script></head><body></body></html>

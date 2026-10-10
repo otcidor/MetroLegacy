@@ -1,0 +1,93 @@
+/* Spanish / Español */
+
+"app_name" = "Metrolist";
+"tab_home" = "Inicio";
+"tab_search" = "Buscar";
+"tab_library" = "Biblioteca";
+"tab_listen_together" = "Escuchar juntos";
+
+/* Home */
+"home_network_error" = "Error de red";
+
+/* Search */
+"search_title" = "Buscar";
+"search_placeholder" = "Buscar canciones, artistas...";
+"filter_all" = "Todo";
+"filter_songs" = "Canciones";
+"filter_videos" = "Videos";
+"filter_albums" = "Álbumes";
+"filter_artists" = "Artistas";
+"filter_playlists" = "Playlists";
+
+/* Player */
+"now_playing" = "REPRODUCIENDO AHORA";
+"loading_audio" = "Cargando audio…";
+"playback_error" = "Error de reproducción";
+"no_video_id" = "Elemento sin videoId";
+"up_next" = "A continuación";
+"songs_count_single" = "%lu canción";
+"songs_count_plural" = "%lu canciones";
+
+/* Library */
+"library_title" = "Biblioteca";
+"sign_in_token" = "Iniciar sesión con token";
+"sign_in_token_sub" = "Método directo avanzado (pegar token)";
+"sign_in_browser" = "Iniciar sesión con navegador";
+"sign_in_browser_sub" = "Conecta mediante portal web de Google";
+"account" = "Cuenta";
+"liked_songs" = "Canciones que te gustan";
+"liked_songs_sub" = "Playlist automática";
+"session_token" = "Token de sesión";
+"session_token_sub" = "Ver, copiar o actualizar token";
+"sign_out" = "Cerrar sesión";
+"language" = "Idioma";
+"language_sub" = "Español";
+"select_language" = "Seleccionar idioma";
+"lang_auto" = "Automático (Sistema)";
+"lang_es" = "Español";
+"lang_en" = "English";
+"lang_ru" = "Русский";
+
+/* Token Editor */
+"token_editor_title" = "Token de sesión";
+"adv_login_title" = "Inicio de sesión avanzado";
+"adv_login_desc" = "Este es un método de inicio de sesión AVANZADO. En lugar de usar el portal web, puedes introducir o actualizar directamente tu token de inicio de sesión. Esto puede ser útil para iniciar sesión rápidamente en varios dispositivos. Los tokens con un formato no reconocido serán rechazados.";
+"paste" = "Pegar";
+"copy" = "Copiar";
+"clear" = "Limpiar";
+"cancel" = "Cancelar";
+"save" = "Guardar";
+"token_placeholder" = "Pega tu token aquí o edítalo...";
+"token_invalid" = "Token inválido";
+"token_saved" = "Token guardado con éxito.";
+"clipboard_empty_title" = "Portapapeles vacío";
+"clipboard_empty_msg" = "No hay texto en el portapapeles para pegar.";
+"copied_title" = "Copiado";
+"copied_msg" = "El token ha sido copiado al portapapeles.";
+"token_format_error" = "El formato del token no fue reconocido.";
+"validating_account" = "Validando cuenta…";
+"signed_in_as" = "Sesión iniciada como %@";
+"success" = "¡Éxito!";
+"token_saved_title" = "Token guardado";
+"token_saved_msg" = "Se guardó el token de sesión.";
+
+/* Login */
+"login_title" = "Iniciar sesión";
+"login_loading" = "Cargando music.youtube.com…";
+"done" = "Listo";
+"login_detected" = "Sesión detectada. Pulsa Listo.";
+"login_prompt" = "Inicia sesión en la página. (Requiere Web Port activado)";
+"login_no_session" = "No se detectó sesión. Inicia sesión primero.";
+"login_validating" = "Validando sesión…";
+"login_hello" = "Hola, %@";
+
+/* Listen Together */
+"listen_together_title" = "Escuchar juntos";
+"listen_together_soon" = "Escuchar juntos estará disponible en una versión futura.";
+
+/* Common */
+"ok" = "Aceptar";
+"close" = "Cerrar";
+"retry" = "Reintentar";
+"load_more" = "Cargar más";
+"not_available" = "No disponible";

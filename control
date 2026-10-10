@@ -1,0 +1,9 @@
+Package: win.otcidor.metrolegacy
+Name: MetroLegacy
+Version: 1.0
+Architecture: iphoneos-arm
+Description: YouTube Music client for iOS 6/7, a port of Metrolist (Android).
+Maintainer: otcidor
+Author: otcidor
+Section: Multimedia
+Depends: mobilesubstrate

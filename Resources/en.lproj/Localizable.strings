@@ -1,0 +1,93 @@
+/* English */
+
+"app_name" = "Metrolist";
+"tab_home" = "Home";
+"tab_search" = "Search";
+"tab_library" = "Library";
+"tab_listen_together" = "Listen Together";
+
+/* Home */
+"home_network_error" = "Network error";
+
+/* Search */
+"search_title" = "Search";
+"search_placeholder" = "Search songs, artists...";
+"filter_all" = "All";
+"filter_songs" = "Songs";
+"filter_videos" = "Videos";
+"filter_albums" = "Albums";
+"filter_artists" = "Artists";
+"filter_playlists" = "Playlists";
+
+/* Player */
+"now_playing" = "NOW PLAYING";
+"loading_audio" = "Loading audio…";
+"playback_error" = "Playback error";
+"no_video_id" = "Item has no videoId";
+"up_next" = "Up Next";
+"songs_count_single" = "%lu song";
+"songs_count_plural" = "%lu songs";
+
+/* Library */
+"library_title" = "Library";
+"sign_in_token" = "Sign in with token";
+"sign_in_token_sub" = "Advanced direct method (paste token)";
+"sign_in_browser" = "Sign in with browser";
+"sign_in_browser_sub" = "Connect via Google web portal";
+"account" = "Account";
+"liked_songs" = "Liked Songs";
+"liked_songs_sub" = "Auto playlist";
+"session_token" = "Session token";
+"session_token_sub" = "View, copy or update token";
+"sign_out" = "Sign out";
+"language" = "Language";
+"language_sub" = "English";
+"select_language" = "Select language";
+"lang_auto" = "Automatic (System)";
+"lang_es" = "Español";
+"lang_en" = "English";
+"lang_ru" = "Русский";
+
+/* Token Editor */
+"token_editor_title" = "Session Token";
+"adv_login_title" = "Advanced Sign In";
+"adv_login_desc" = "This is an ADVANCED sign-in method. Instead of using the web portal, you can directly enter or update your session token. This can be useful for quickly logging in across multiple devices. Unrecognized token formats will be rejected.";
+"paste" = "Paste";
+"copy" = "Copy";
+"clear" = "Clear";
+"cancel" = "Cancel";
+"save" = "Save";
+"token_placeholder" = "Paste your token here or edit it...";
+"token_invalid" = "Invalid token";
+"token_saved" = "Token saved successfully.";
+"clipboard_empty_title" = "Clipboard empty";
+"clipboard_empty_msg" = "There is no text on the clipboard to paste.";
+"copied_title" = "Copied";
+"copied_msg" = "Token has been copied to clipboard.";
+"token_format_error" = "Token format was not recognized.";
+"validating_account" = "Validating account…";
+"signed_in_as" = "Signed in as %@";
+"success" = "Success!";
+"token_saved_title" = "Token saved";
+"token_saved_msg" = "Session token saved.";
+
+/* Login */
+"login_title" = "Sign In";
+"login_loading" = "Loading music.youtube.com…";
+"done" = "Done";
+"login_detected" = "Session detected. Tap Done.";
+"login_prompt" = "Sign in to the web page. (Requires Web Port enabled)";
+"login_no_session" = "No session detected. Sign in first.";
+"login_validating" = "Validating session…";
+"login_hello" = "Hello, %@";
+
+/* Listen Together */
+"listen_together_title" = "Listen Together";
+"listen_together_soon" = "Listen Together will be available in a future version.";
+
+/* Common */
+"ok" = "OK";
+"close" = "Close";
+"retry" = "Retry";
+"load_more" = "Load more";
+"not_available" = "Not available";

@@ -1,0 +1,93 @@
+/* Russian / Русский */
+
+"app_name" = "Metrolist";
+"tab_home" = "Главная";
+"tab_search" = "Поиск";
+"tab_library" = "Медиатека";
+"tab_listen_together" = "Слушать вместе";
+
+/* Home */
+"home_network_error" = "Ошибка сети";
+
+/* Search */
+"search_title" = "Поиск";
+"search_placeholder" = "Поиск треков, артистов...";
+"filter_all" = "Все";
+"filter_songs" = "Треки";
+"filter_videos" = "Видео";
+"filter_albums" = "Альбомы";
+"filter_artists" = "Артисты";
+"filter_playlists" = "Плейлисты";
+
+/* Player */
+"now_playing" = "СЕЙЧАС ИГРАЕТ";
+"loading_audio" = "Загрузка аудио…";
+"playback_error" = "Ошибка воспроизведения";
+"no_video_id" = "Элемент без videoId";
+"up_next" = "Далее";
+"songs_count_single" = "%lu трек";
+"songs_count_plural" = "%lu треков";
+
+/* Library */
+"library_title" = "Медиатека";
+"sign_in_token" = "Войти по токену";
+"sign_in_token_sub" = "Прямой метод (вставить токен)";
+"sign_in_browser" = "Войти через браузер";
+"sign_in_browser_sub" = "Вход через страницу Google";
+"account" = "Аккаунт";
+"liked_songs" = "Понравившиеся";
+"liked_songs_sub" = "Автоплейлист";
+"session_token" = "Токен сессии";
+"session_token_sub" = "Посмотреть, скопировать или обновить";
+"sign_out" = "Выйти из аккаунта";
+"language" = "Язык";
+"language_sub" = "Русский";
+"select_language" = "Выберите язык";
+"lang_auto" = "Автоматически (Система)";
+"lang_es" = "Español";
+"lang_en" = "English";
+"lang_ru" = "Русский";
+
+/* Token Editor */
+"token_editor_title" = "Токен сессии";
+"adv_login_title" = "Расширенный вход";
+"adv_login_desc" = "Это РАСШИРЕННЫЙ метод входа. Вместо веб-портала вы можете напрямую ввести или обновить токен сессии. Это удобно для быстрого входа на нескольких устройствах. Некорректные форматы токенов будут отклонены.";
+"paste" = "Вставить";
+"copy" = "Копировать";
+"clear" = "Очистить";
+"cancel" = "Отмена";
+"save" = "Сохранить";
+"token_placeholder" = "Вставьте токен сюда или отредактируйте...";
+"token_invalid" = "Недействительный токен";
+"token_saved" = "Токен успешно сохранен.";
+"clipboard_empty_title" = "Буфер обмена пуст";
+"clipboard_empty_msg" = "В буфере обмена нет текста для вставки.";
+"copied_title" = "Скопировано";
+"copied_msg" = "Токен скопирован в буфер обмена.";
+"token_format_error" = "Формат токена не распознан.";
+"validating_account" = "Проверка аккаунта…";
+"signed_in_as" = "Вход выполнен как %@";
+"success" = "Успешно!";
+"token_saved_title" = "Токен сохранен";
+"token_saved_msg" = "Токен сессии сохранен.";
+
+/* Login */
+"login_title" = "Вход";
+"login_loading" = "Загрузка music.youtube.com…";
+"done" = "Готово";
+"login_detected" = "Сессия обнаружена. Нажмите Готово.";
+"login_prompt" = "Войдите на странице. (Требуется Web Port)";
+"login_no_session" = "Сессия не обнаружена. Сначала выполните вход.";
+"login_validating" = "Проверка сессии…";
+"login_hello" = "Привет, %@";
+
+/* Listen Together */
+"listen_together_title" = "Слушать вместе";
+"listen_together_soon" = "Совместное прослушивание появится в будущей версии.";
+
+/* Common */
+"ok" = "ОК";
+"close" = "Закрыть";
+"retry" = "Повторить";
+"load_more" = "Загрузить еще";
+"not_available" = "Недоступно";
