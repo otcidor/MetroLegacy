@@ -7,6 +7,9 @@
 "tab_listen_together" = "Listen Together";
 
 /* Home */
+"home_title" = "Home";
+"speed_dial" = "Speed dial";
+"speed_dial_lucky" = "Lucky";
 "home_network_error" = "Network error";
 
 /* Search */
@@ -144,4 +147,83 @@
 "section_songs" = "Library Songs";
 "section_settings" = "Account & Storage";
 "account_section" = "Account & Storage";
+"keep_listening" = "Keep listening";
+"save_queue_as_playlist" = "Save queue as playlist";
+"cancel_download" = "Cancel download";
+"cancel_downloads" = "Cancel downloads";
+"downloads_in_progress" = "Downloads in progress";
+"enter_playlist_name" = "Enter a playlist name:";
+"queue_playlist_default" = "Playback Queue";
+"queue_empty_title" = "Empty Queue";
+"queue_empty_message" = "There are no songs in the queue to save.";
+"playlist_saved_title" = "Playlist Saved";
+"playlist_saved_prompt_download" = "Playlist \"%@\" saved (%lu songs). Do you want to download it now for offline playback?";
+"download_now" = "Download now";
+"later" = "Later";
+"download_completed_title" = "Downloads";
+"all_songs_downloaded" = "All songs in this list are already downloaded.";
+
+/* Sleep Timer */
+"sleep_timer" = "Sleep Timer";
+"sleep_timer_off" = "Turn off timer";
+"sleep_timer_15m" = "15 minutes";
+"sleep_timer_30m" = "30 minutes";
+"sleep_timer_45m" = "45 minutes";
+"sleep_timer_60m" = "60 minutes";
+"sleep_timer_end_of_song" = "At end of this song";
+"sleep_timer_active_min" = "Timer active (%ld min left)";
+
+/* Lyrics */
+"lyrics_title" = "Lyrics";
+"lyrics_loading" = "Loading lyrics…";
+"lyrics_not_found" = "No lyrics available";
+"lyrics_synced" = "Synced";
+"lyrics_plain" = "Text";
+
+/* SponsorBlock */
+"sponsorblock_title" = "SponsorBlock";
+"sponsorblock_skipped" = "Skipped non-music segment";
+
+/* Device Flow */
+"sign_in_device" = "Device Code (Recommended)";
+"sign_in_device_sub" = "Sign in easily from google.com/device";
+"device_code_prompt" = "1. Open in your browser:";
+"device_code_url" = "google.com/device";
+"device_code_enter" = "2. Enter this code:";
+"device_code_waiting" = "Waiting for authorization…";
+"device_code_success" = "Sign in successful!";
+
+/* Search History & Filters */
+"recent_searches" = "Recent Searches";
+"clear_search_history" = "Clear search history";
+"clear_history_confirm" = "Do you want to clear your entire search history?";
+
+/* Sort */
+"sort_by" = "Sort by";
+"sort_recent" = "Recently added";
+"sort_name" = "Name (A-Z)";
+"sort_artist" = "Artist";
+
+/* Home Moods & Quick Picks */
+"quick_picks" = "Quick Picks";
+"mood_relax" = "Relax";
+"mood_energize" = "Energize";
+"mood_workout" = "Workout";
+"mood_focus" = "Focus";
+"mood_commute" = "Commute";
+
+/* My Top 50 & Library */
+"my_top_50" = "My Top 50";
+"no_recent_searches" = "No recent searches";
+
+/* Theme & Appearance */
+"theme_section" = "Theme & Appearance";
+"theme_dynamic" = "Dynamic Theme";
+"theme_dynamic_sub" = "Colors the app based on current song";
+"theme_pure_black" = "Pure Black (AMOLED)";
+"theme_pure_black_sub" = "Pure black background (#000000)";
+"theme_accent_color" = "Default Accent Color";
+"theme_accent_color_sub" = "Material Design 3 Palette";
+"enabled" = "Enabled";
+"disabled" = "Disabled";
 

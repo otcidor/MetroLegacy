@@ -7,6 +7,9 @@
 "tab_listen_together" = "Escuchar juntos";
 
 /* Home */
+"home_title" = "Inicio";
+"speed_dial" = "Marcado rápido";
+"speed_dial_lucky" = "Aleatorio";
 "home_network_error" = "Error de red";
 
 /* Search */
@@ -144,4 +147,83 @@
 "section_songs" = "Canciones en biblioteca";
 "section_settings" = "Cuenta y almacenamiento";
 "account_section" = "Cuenta y almacenamiento";
+"keep_listening" = "Seguir escuchando";
+"save_queue_as_playlist" = "Guardar cola como playlist";
+"cancel_download" = "Cancelar descarga";
+"cancel_downloads" = "Cancelar descargas";
+"downloads_in_progress" = "Descargas en curso";
+"enter_playlist_name" = "Introduce un nombre para la playlist:";
+"queue_playlist_default" = "Cola de reproducción";
+"queue_empty_title" = "Cola vacía";
+"queue_empty_message" = "No hay canciones en la cola para guardar.";
+"playlist_saved_title" = "Playlist guardada";
+"playlist_saved_prompt_download" = "La playlist \"%@\" ha sido guardada (%lu canciones). ¿Deseas descargarla ahora para escuchar sin conexión?";
+"download_now" = "Descargar ahora";
+"later" = "Más tarde";
+"download_completed_title" = "Descargas";
+"all_songs_downloaded" = "Todas las canciones de esta lista ya están descargadas.";
+
+/* Sleep Timer */
+"sleep_timer" = "Temporizador de apagado";
+"sleep_timer_off" = "Desactivar temporizador";
+"sleep_timer_15m" = "15 minutos";
+"sleep_timer_30m" = "30 minutos";
+"sleep_timer_45m" = "45 minutos";
+"sleep_timer_60m" = "60 minutos";
+"sleep_timer_end_of_song" = "Al terminar esta canción";
+"sleep_timer_active_min" = "Temporizador activo (%ld min restantes)";
+
+/* Lyrics */
+"lyrics_title" = "Letras";
+"lyrics_loading" = "Cargando letras…";
+"lyrics_not_found" = "No hay letra disponible";
+"lyrics_synced" = "Sincronizada";
+"lyrics_plain" = "Texto";
+
+/* SponsorBlock */
+"sponsorblock_title" = "SponsorBlock";
+"sponsorblock_skipped" = "Saltado segmento no musical";
+
+/* Device Flow */
+"sign_in_device" = "Código de dispositivo (Recomendado)";
+"sign_in_device_sub" = "Inicia sesión fácilmente desde google.com/device";
+"device_code_prompt" = "1. Abre en tu navegador:";
+"device_code_url" = "google.com/device";
+"device_code_enter" = "2. Escribe este código:";
+"device_code_waiting" = "Esperando confirmación…";
+"device_code_success" = "¡Inicio de sesión exitoso!";
+
+/* Search History & Filters */
+"recent_searches" = "Búsquedas recientes";
+"clear_search_history" = "Borrar historial de búsqueda";
+"clear_history_confirm" = "¿Deseas borrar todo el historial de búsqueda?";
+
+/* Sort */
+"sort_by" = "Ordenar por";
+"sort_recent" = "Añadido recientemente";
+"sort_name" = "Nombre (A-Z)";
+"sort_artist" = "Artista";
+
+/* Home Moods & Quick Picks */
+"quick_picks" = "Selección rápida";
+"mood_relax" = "Relajación";
+"mood_energize" = "Energía";
+"mood_workout" = "Entrenamiento";
+"mood_focus" = "Concentración";
+"mood_commute" = "Viaje";
+
+/* My Top 50 & Library */
+"my_top_50" = "Mi Top 50";
+"no_recent_searches" = "Sin búsquedas recientes";
+
+/* Theme & Appearance */
+"theme_section" = "Tema y Apariencia";
+"theme_dynamic" = "Tema dinámico";
+"theme_dynamic_sub" = "Colorea la app según la canción actual";
+"theme_pure_black" = "Negro puro (AMOLED)";
+"theme_pure_black_sub" = "Fondo negro absoluto (#000000)";
+"theme_accent_color" = "Color de acento predeterminado";
+"theme_accent_color_sub" = "Paleta Material Design 3";
+"enabled" = "Activado";
+"disabled" = "Desactivado";
 

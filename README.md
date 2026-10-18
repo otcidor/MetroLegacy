@@ -2,7 +2,7 @@
 
 **MetroLegacy** is a native YouTube Music client designed for iOS 6+.
 
-Inspired by the interface, design, and user experience of **[Metrolist](https://github.com/MetrolistGroup/Metrolist)** for Android, but reimplemented from scratch in pure **Objective-C** on top of classic UIKit and Theos.
+Inspired by the interface, design, and user experience of **[Metrolist](https://github.com/MetrolistGroup/Metrolist)** for Android, but reimplemented with AI from scratch in pure **Objective-C**.
 
 ---
 
