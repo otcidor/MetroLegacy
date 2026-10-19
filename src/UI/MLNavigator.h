@@ -10,5 +10,6 @@
 + (void)openItem:(MLYTItem *)item fromViewController:(UIViewController *)vc;
 + (void)playSong:(MLYTItem *)item fromViewController:(UIViewController *)vc;
 + (void)presentSongMenuForItem:(MLYTItem *)item fromViewController:(UIViewController *)vc;
++ (void)presentSleepTimerPickerFromViewController:(UIViewController *)vc;
 
 @end

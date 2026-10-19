@@ -117,8 +117,12 @@
 	// Setup Web View Container (hidden initially)
 	[self setupWebViewContainerWithTopY:barH];
 
-	// Start Device Flow
-	[self startDeviceFlow];
+	// Start Device Flow or Web Mode
+	if (_startInWebViewMode) {
+		[self switchModeTap];
+	} else {
+		[self startDeviceFlow];
+	}
 }
 
 - (void)setupDeviceFlowViewWithTopY:(CGFloat)topY

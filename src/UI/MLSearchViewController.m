@@ -38,6 +38,11 @@
 
 - (void)dealloc
 {
+	[_debounce invalidate];
+	_debounce = nil;
+	_table.dataSource = nil;
+	_table.delegate = nil;
+	_field.delegate = nil;
 	[[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -258,6 +263,13 @@
 	[MLTheme resetNavigationBarForNavigationController:self.navigationController];
 	[self updateLayoutForResultsState];
 	[_table reloadData];
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+	[super viewWillDisappear:animated];
+	[_debounce invalidate];
+	_debounce = nil;
 }
 
 - (void)filterTap:(MLChip *)chip

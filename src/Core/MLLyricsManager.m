@@ -135,7 +135,10 @@
 	if (cached) {
 		if (completion) {
 			dispatch_async(dispatch_get_main_queue(), ^{
-				completion(cached[@"lines"], [cached[@"synced"] boolValue], nil);
+				NSArray *lines = cached[@"lines"] ?: @[];
+				BOOL synced = [cached[@"synced"] boolValue];
+				NSString *err = [cached[@"notFound"] boolValue] ? @"No lyrics found" : nil;
+				completion(lines, synced, err);
 			});
 		}
 		return;
@@ -202,6 +205,7 @@
 				if (completion) completion(resultLines, isSynced, nil);
 			});
 		} else {
+			[self->_cache setObject:@{ @"lines": @[], @"synced": @NO, @"notFound": @YES } forKey:cacheKey];
 			dispatch_async(dispatch_get_main_queue(), ^{
 				if (completion) completion(@[], NO, @"No lyrics found");
 			});

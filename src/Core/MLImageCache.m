@@ -173,14 +173,19 @@ static BOOL IsCurrentKey(UIImageView *iv, NSString *key)
 		_mem = [[NSCache alloc] init];
 		[_mem setCountLimit:260];
 
+		NSUInteger cores = [[NSProcessInfo processInfo] activeProcessorCount];
+
 		_diskQueue = [[NSOperationQueue alloc] init];
-		_diskQueue.maxConcurrentOperationCount = 2;
+		_diskQueue.maxConcurrentOperationCount = (cores > 2) ? 2 : 1;
 
 		_netQueue = [[NSOperationQueue alloc] init];
-		_netQueue.maxConcurrentOperationCount = 4;
+		_netQueue.maxConcurrentOperationCount = (cores > 2) ? 4 : 2;
 
 		_inflight = [NSMutableDictionary dictionary];
-		[self trimDisk];
+
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(25.0 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+			[self trimDisk];
+		});
 	}
 	return self;
 }

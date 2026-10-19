@@ -4,6 +4,8 @@
 #import "MLLibraryManager.h"
 #import "MLInnerTube.h"
 #import "MLLocalization.h"
+#import "MLPlaybackManager.h"
+#import "MLBottomSheet.h"
 #import <objc/runtime.h>
 
 static const char *const MLSongMenuActionTargetKey = "ml.songmenu.target";
@@ -132,33 +134,7 @@ static const char *const MLSongMenuActionTargetKey = "ml.songmenu.target";
 
 - (void)presentSleepTimerPicker
 {
-	if (!_viewController) return;
-	_pickingSleepTimer = YES;
-	_sleepTimerOptions = @[@15, @30, @45, @60, @(-1)];
-
-	MLPlaybackManager *pm = [MLPlaybackManager sharedManager];
-	UIActionSheet *picker = [[UIActionSheet alloc] initWithTitle:MLLocalizedString(@"sleep_timer", nil)
-	                                                    delegate:self
-	                                           cancelButtonTitle:nil
-	                                      destructiveButtonTitle:nil
-	                                           otherButtonTitles:nil];
-	[picker addButtonWithTitle:MLLocalizedString(@"sleep_timer_15m", nil)];
-	[picker addButtonWithTitle:MLLocalizedString(@"sleep_timer_30m", nil)];
-	[picker addButtonWithTitle:MLLocalizedString(@"sleep_timer_45m", nil)];
-	[picker addButtonWithTitle:MLLocalizedString(@"sleep_timer_60m", nil)];
-	[picker addButtonWithTitle:MLLocalizedString(@"sleep_timer_end_of_song", nil)];
-
-	if (pm.sleepTimerActive) {
-		NSInteger turnOffIdx = [picker addButtonWithTitle:MLLocalizedString(@"sleep_timer_off", nil)];
-		picker.destructiveButtonIndex = turnOffIdx;
-	}
-
-	NSInteger cancelIdx = [picker addButtonWithTitle:MLLocalizedString(@"cancel", nil)];
-	picker.cancelButtonIndex = cancelIdx;
-
-	objc_setAssociatedObject(picker, MLSongMenuActionTargetKey, self, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-	UIView *hostView = _viewController.view.window ?: _viewController.view;
-	[picker showInView:hostView];
+	[MLNavigator presentSleepTimerPickerFromViewController:_viewController];
 }
 
 - (void)promptSaveQueue
@@ -183,25 +159,34 @@ static const char *const MLSongMenuActionTargetKey = "ml.songmenu.target";
 - (void)presentPlaylistPicker
 {
 	if (!_viewController) return;
-	_pickingPlaylist = YES;
-	_playlists = [MLLibraryManager sharedManager].syncedPlaylists ?: @[];
+	NSArray *playlists = [MLLibraryManager sharedManager].syncedPlaylists ?: @[];
+	NSMutableArray *items = [NSMutableArray array];
 
-	UIActionSheet *picker = [[UIActionSheet alloc] initWithTitle:MLLocalizedString(@"add_to_playlist", nil)
-	                                                    delegate:self
-	                                           cancelButtonTitle:nil
-	                                      destructiveButtonTitle:nil
-	                                           otherButtonTitles:nil];
-	for (MLYTItem *pl in _playlists) {
-		[picker addButtonWithTitle:pl.title ?: @"Playlist"];
+	for (MLYTItem *pl in playlists) {
+		NSString *pid = pl.playlistId ?: pl.browseId;
+		[items addObject:[MLBottomSheetItem itemWithTitle:pl.title ?: @"Playlist" iconName:@"playlist_play" handler:^{
+			if (pid.length && self->_item.videoId.length) {
+				[[MLInnerTube sharedClient] addVideoId:self->_item.videoId toPlaylistId:pid completion:nil];
+			}
+		}]];
 	}
-	[picker addButtonWithTitle:MLLocalizedString(@"new_playlist", nil)];
-	NSInteger cancelIdx = [picker addButtonWithTitle:MLLocalizedString(@"cancel", nil)];
-	picker.cancelButtonIndex = cancelIdx;
 
-	objc_setAssociatedObject(picker, MLSongMenuActionTargetKey, self, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	__weak MLSongMenuHandler *whandler = self;
+	[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"new_playlist", nil) iconName:@"add" handler:^{
+		UIAlertView *alert = [[UIAlertView alloc] initWithTitle:MLLocalizedString(@"new_playlist", nil)
+		                                                message:nil
+		                                               delegate:whandler
+		                                      cancelButtonTitle:MLLocalizedString(@"cancel", nil)
+		                                      otherButtonTitles:MLLocalizedString(@"create", nil), nil];
+		alert.alertViewStyle = UIAlertViewStylePlainTextInput;
+		UITextField *tf = [alert textFieldAtIndex:0];
+		tf.placeholder = MLLocalizedString(@"playlist_name_placeholder", nil);
+		objc_setAssociatedObject(alert, MLSongMenuActionTargetKey, whandler, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		[alert show];
+	}]];
 
-	UIView *hostView = _viewController.view.window ?: _viewController.view;
-	[picker showInView:hostView];
+	MLBottomSheetMenu *menu = [MLBottomSheetMenu menuWithTitle:MLLocalizedString(@"add_to_playlist", nil) items:items];
+	[menu showInViewController:_viewController];
 }
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
@@ -337,77 +322,139 @@ static const char *const MLSongMenuActionTargetKey = "ml.songmenu.target";
 	handler.viewController = vc;
 
 	MLLibraryManager *lib = [MLLibraryManager sharedManager];
-	NSMutableArray *keys = [NSMutableArray array];
-	UIActionSheet *sheet = [[UIActionSheet alloc] initWithTitle:item.title
-	                                                   delegate:handler
-	                                          cancelButtonTitle:nil
-	                                     destructiveButtonTitle:nil
-	                                          otherButtonTitles:nil];
-
-	BOOL isLiked = [lib isSongLiked:item.videoId];
-	[sheet addButtonWithTitle:isLiked ? MLLocalizedString(@"unlike_song", nil) : MLLocalizedString(@"like_song", nil)];
-	[keys addObject:@"toggle_like"];
-
-	if ([lib isSongDownloaded:item.videoId]) {
-		[sheet addButtonWithTitle:MLLocalizedString(@"remove_download", nil)];
-		[keys addObject:@"remove_download"];
-	} else if ([lib isSongDownloading:item.videoId]) {
-		[sheet addButtonWithTitle:MLLocalizedString(@"cancel_download", nil)];
-		[keys addObject:@"cancel_download"];
-	} else {
-		[sheet addButtonWithTitle:MLLocalizedString(@"download_song", nil)];
-		[keys addObject:@"download"];
-	}
-
-	if ([[MLInnerTube sharedClient] loggedIn]) {
-		[sheet addButtonWithTitle:MLLocalizedString(@"add_to_playlist", nil)];
-		[keys addObject:@"add_to_playlist"];
-	}
-
-	[sheet addButtonWithTitle:MLLocalizedString(@"play_next", nil)];
-	[keys addObject:@"play_next"];
-
-	[sheet addButtonWithTitle:MLLocalizedString(@"add_to_queue", nil)];
-	[keys addObject:@"add_to_queue"];
-
-	[sheet addButtonWithTitle:MLLocalizedString(@"start_radio", nil)];
-	[keys addObject:@"start_radio"];
-
 	MLPlaybackManager *pm = [MLPlaybackManager sharedManager];
+	NSMutableArray *items = [NSMutableArray array];
 
+	// Like / Unlike
+	BOOL isLiked = [lib isSongLiked:item.videoId];
+	NSString *likeTitle = isLiked ? MLLocalizedString(@"unlike_song", nil) : MLLocalizedString(@"like_song", nil);
+	NSString *likeIcon = isLiked ? @"favorite" : @"favorite_border";
+	[items addObject:[MLBottomSheetItem itemWithTitle:likeTitle iconName:likeIcon handler:^{
+		[lib toggleLikeForSong:item completion:nil];
+	}]];
+
+	// Download / Remove
+	if ([lib isSongDownloaded:item.videoId]) {
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"remove_download", nil) subtitle:nil iconName:@"delete" isDestructive:YES handler:^{
+			[lib removeDownloadedSong:item.videoId];
+		}]];
+	} else if ([lib isSongDownloading:item.videoId]) {
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"cancel_download", nil) subtitle:nil iconName:@"close" isDestructive:YES handler:^{
+			[lib cancelDownloadForVideoId:item.videoId];
+		}]];
+	} else {
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"download_song", nil) iconName:@"download" handler:^{
+			[lib downloadSong:item completion:nil];
+		}]];
+	}
+
+	// Add to playlist
+	if ([[MLInnerTube sharedClient] loggedIn]) {
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"add_to_playlist", nil) iconName:@"playlist_add" handler:^{
+			[handler presentPlaylistPicker];
+		}]];
+	}
+
+	// Play next
+	[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"play_next", nil) iconName:@"playlist_play" handler:^{
+		[pm playNextItem:item];
+	}]];
+
+	// Add to queue
+	[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"add_to_queue", nil) iconName:@"queue_music" handler:^{
+		[pm appendQueueItems:@[item]];
+	}]];
+
+	// Start radio
+	[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"start_radio", nil) iconName:@"radio" handler:^{
+		[pm playRadioForItem:item];
+	}]];
+
+	// Go to artist
 	if (item.artistBrowseId.length > 0 && vc.navigationController) {
-		[sheet addButtonWithTitle:MLLocalizedString(@"go_to_artist", nil)];
-		[keys addObject:@"go_to_artist"];
-	}
-	if (item.albumBrowseId.length > 0 && vc.navigationController) {
-		[sheet addButtonWithTitle:MLLocalizedString(@"go_to_album", nil)];
-		[keys addObject:@"go_to_album"];
-	}
-	if (item.videoId.length > 0) {
-		[sheet addButtonWithTitle:MLLocalizedString(@"copy_link", nil)];
-		[keys addObject:@"copy_link"];
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"go_to_artist", nil) iconName:@"person" handler:^{
+			NSString *artistName = item.artists.count ? item.artists[0] : (item.subtitle ?: @"");
+			MLArtistViewController *artistVC = [[MLArtistViewController alloc] initWithBrowseId:item.artistBrowseId name:artistName];
+			[vc.navigationController pushViewController:artistVC animated:YES];
+		}]];
 	}
 
+	// Go to album
+	if (item.albumBrowseId.length > 0 && vc.navigationController) {
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"go_to_album", nil) iconName:@"album" handler:^{
+			MLYTItem *albumItem = [[MLYTItem alloc] init];
+			albumItem.kind = MLYTKindAlbum;
+			albumItem.browseId = item.albumBrowseId;
+			albumItem.title = item.title;
+			albumItem.thumbnailUrl = item.thumbnailUrl;
+			MLListDetailViewController *detailVC = [[MLListDetailViewController alloc] initWithAlbumItem:albumItem];
+			[vc.navigationController pushViewController:detailVC animated:YES];
+		}]];
+	}
+
+	// Copy link
+	if (item.videoId.length > 0) {
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"copy_link", nil) iconName:@"content_copy" handler:^{
+			[UIPasteboard generalPasteboard].string = [NSString stringWithFormat:@"https://music.youtube.com/watch?v=%@", item.videoId];
+		}]];
+	}
+
+	// Sleep timer
+	NSString *timerTitle = MLLocalizedString(@"sleep_timer", nil);
 	if (pm.sleepTimerActive) {
 		NSTimeInterval rem = pm.sleepTimerRemainingTime;
 		NSInteger mins = (NSInteger)ceil(rem / 60.0);
 		if (mins > 0) {
-			[sheet addButtonWithTitle:[NSString stringWithFormat:MLLocalizedString(@"sleep_timer_active_min", nil), (long)mins]];
-		} else {
-			[sheet addButtonWithTitle:MLLocalizedString(@"sleep_timer", nil)];
+			timerTitle = [NSString stringWithFormat:MLLocalizedString(@"sleep_timer_active_min", nil), (long)mins];
 		}
-	} else {
-		[sheet addButtonWithTitle:MLLocalizedString(@"sleep_timer", nil)];
 	}
-	[keys addObject:@"sleep_timer"];
+	[items addObject:[MLBottomSheetItem itemWithTitle:timerTitle iconName:@"bedtime" handler:^{
+		[handler presentSleepTimerPicker];
+	}]];
 
-	NSInteger cancelIdx = [sheet addButtonWithTitle:MLLocalizedString(@"cancel", nil)];
-	sheet.cancelButtonIndex = cancelIdx;
-	handler.actionKeys = keys;
+	NSString *subtitle = item.artists.count ? [item.artists componentsJoinedByString:@", "] : (item.subtitle ?: @"");
+	MLBottomSheetMenu *menu = [MLBottomSheetMenu menuWithTitle:item.title subtitle:subtitle items:items];
+	[menu showInViewController:vc];
+}
 
-	objc_setAssociatedObject(sheet, MLSongMenuActionTargetKey, handler, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-	UIView *hostView = vc.view.window ?: vc.view;
-	[sheet showInView:hostView];
++ (void)presentSleepTimerPickerFromViewController:(UIViewController *)vc
+{
+	if (!vc) return;
+	MLPlaybackManager *pm = [MLPlaybackManager sharedManager];
+	NSMutableArray *items = [NSMutableArray array];
+
+	NSArray *options = @[
+		@{@"min": @15, @"title": MLLocalizedString(@"sleep_timer_15m", nil)},
+		@{@"min": @30, @"title": MLLocalizedString(@"sleep_timer_30m", nil)},
+		@{@"min": @45, @"title": MLLocalizedString(@"sleep_timer_45m", nil)},
+		@{@"min": @60, @"title": MLLocalizedString(@"sleep_timer_60m", nil)},
+		@{@"min": @(-1), @"title": MLLocalizedString(@"sleep_timer_end_of_song", nil)},
+	];
+
+	for (NSDictionary *opt in options) {
+		NSInteger m = [opt[@"min"] integerValue];
+		NSString *t = opt[@"title"];
+		[items addObject:[MLBottomSheetItem itemWithTitle:t iconName:@"timer" handler:^{
+			if (m == -1) {
+				[pm setSleepTimerStopAfterCurrentSong];
+			} else {
+				[pm setSleepTimerWithMinutes:(NSUInteger)m];
+			}
+		}]];
+	}
+
+	if (pm.sleepTimerActive) {
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"sleep_timer_off", nil)
+		                                         subtitle:nil
+		                                         iconName:@"close"
+		                                    isDestructive:YES
+		                                          handler:^{
+			[pm cancelSleepTimer];
+		}]];
+	}
+
+	MLBottomSheetMenu *menu = [MLBottomSheetMenu menuWithTitle:MLLocalizedString(@"sleep_timer", nil) items:items];
+	[menu showInViewController:vc];
 }
 
 @end

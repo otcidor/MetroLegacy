@@ -28,6 +28,8 @@
 "playback_error" = "Error de reproducción";
 "no_video_id" = "Elemento sin videoId";
 "up_next" = "A continuación";
+"play" = "Reproducir";
+"pause" = "Pausar";
 "songs_count_single" = "%lu canción";
 "songs_count_plural" = "%lu canciones";
 
@@ -226,4 +228,17 @@
 "theme_accent_color_sub" = "Paleta Material Design 3";
 "enabled" = "Activado";
 "disabled" = "Desactivado";
+
+/* Account & Settings Additions */
+"logout_confirm_title" = "¿Cerrar sesión de YouTube Music?";
+"logout_clear" = "Cerrar sesión y borrar datos locales";
+"logout_keep" = "Cerrar sesión (conservar descargas)";
+"account_guest" = "Invitado";
+"account_guest_sub" = "Inicia sesión para sincronizar tus listas y me gusta";
+"action_login" = "Acceder";
+"storage_section" = "Almacenamiento y Ajustes";
+"about_section" = "Acerca de";
+"about_title" = "MetroLegacy";
+"about_sub" = "Inspirado en MetroList por vfsfitvnm";
+"about_details" = "v1.0.0 • Cliente YouTube Music para iOS 6+";
 

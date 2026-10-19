@@ -11,7 +11,7 @@
 
 @end
 
-@interface MLAccountSettingsViewController : UIViewController <UITableViewDataSource, UITableViewDelegate, UIActionSheetDelegate>
+@interface MLAccountSettingsViewController : UIViewController <UITableViewDataSource, UITableViewDelegate>
 
 + (UIBarButtonItem *)barButtonItemForViewController:(UIViewController *)targetVC;
 + (void)presentFromViewController:(UIViewController *)presenter;

@@ -98,9 +98,7 @@ static NSString *const MLSponsorBlockEnabledKey = @"MLSponsorBlockEnabled";
 			}
 		}
 
-		if (result.count > 0) {
-			[_cache setObject:result forKey:videoId];
-		}
+		[_cache setObject:(result ?: @[]) forKey:videoId];
 
 		dispatch_async(dispatch_get_main_queue(), ^{
 			if (completion) completion(result);

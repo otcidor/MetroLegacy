@@ -8,6 +8,7 @@
 #import "MLPlaybackManager.h"
 #import "MLLibraryManager.h"
 #import "MLLocalization.h"
+#import "MLBottomSheet.h"
 #import <QuartzCore/QuartzCore.h>
 
 typedef enum {
@@ -127,6 +128,8 @@ typedef enum {
 
 - (void)dealloc
 {
+	_table.dataSource = nil;
+	_table.delegate = nil;
 	[[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -238,13 +241,18 @@ typedef enum {
 	}
 
 	if (anyDownloading || [lib isBatchDownloading]) {
-		UIActionSheet *sheet = [[UIActionSheet alloc] initWithTitle:MLLocalizedString(@"downloads_in_progress", nil)
-		                                                   delegate:self
-		                                          cancelButtonTitle:MLLocalizedString(@"cancel", nil)
-		                                     destructiveButtonTitle:MLLocalizedString(@"cancel_downloads", nil)
-		                                          otherButtonTitles:nil];
-		sheet.tag = 5001;
-		[sheet showInView:self.view];
+		__weak MLListDetailViewController *wself = self;
+		MLBottomSheetItem *itCancel = [MLBottomSheetItem itemWithTitle:MLLocalizedString(@"cancel_downloads", nil)
+		                                                      subtitle:nil
+		                                                      iconName:@"close"
+		                                                 isDestructive:YES
+		                                                       handler:^{
+			[[MLLibraryManager sharedManager] cancelAllDownloads];
+			[wself updateDownloadButtonState];
+		}];
+		MLBottomSheetMenu *menu = [MLBottomSheetMenu menuWithTitle:MLLocalizedString(@"downloads_in_progress", nil)
+		                                                     items:@[itCancel]];
+		[menu showInView:self.view];
 		return;
 	}
 
@@ -260,16 +268,6 @@ typedef enum {
 
 	[lib downloadAllSongs:_tracks];
 	[self updateDownloadButtonState];
-}
-
-- (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex
-{
-	if (actionSheet.tag == 5001) {
-		if (buttonIndex == actionSheet.destructiveButtonIndex) {
-			[[MLLibraryManager sharedManager] cancelAllDownloads];
-			[self updateDownloadButtonState];
-		}
-	}
 }
 
 - (void)playbackChanged:(NSNotification *)note

@@ -345,11 +345,12 @@
 {
 	CGRect full = self.view.bounds;
 	[UIView animateWithDuration:0.24f delay:0.0f options:UIViewAnimationOptionCurveEaseIn animations:^{
-		_playerVC.view.transform = CGAffineTransformMakeTranslation(0, full.size.height);
+		self->_playerVC.view.transform = CGAffineTransformMakeTranslation(0, full.size.height);
 	} completion:^(BOOL finished) {
-		[_playerVC willMoveToParentViewController:nil];
-		[_playerVC.view removeFromSuperview];
-		[_playerVC removeFromParentViewController];
+		[self->_playerVC willMoveToParentViewController:nil];
+		[self->_playerVC.view removeFromSuperview];
+		[self->_playerVC removeFromParentViewController];
+		self->_playerVC = nil;
 	}];
 }
 

@@ -54,7 +54,7 @@
 	[self.window makeKeyAndVisible];
 	self.window.rootViewController = [[MLRootViewController alloc] init];
 
-	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
 		[[MLInnerTube sharedClient] bootstrapVisitorData:^(BOOL ok) {}];
 		[[MLYouTubeCipher sharedSolver] ensureConfigured:^(NSInteger sts, NSString *sig, NSString *err) {}];
 	});

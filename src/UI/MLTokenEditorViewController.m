@@ -19,6 +19,7 @@
 
 - (void)dealloc
 {
+	_textView.delegate = nil;
 	[[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 

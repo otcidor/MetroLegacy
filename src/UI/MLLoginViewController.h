@@ -6,4 +6,6 @@
  */
 @interface MLLoginViewController : UIViewController <UIWebViewDelegate>
 
+@property (nonatomic, assign) BOOL startInWebViewMode;
+
 @end

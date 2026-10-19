@@ -28,6 +28,8 @@
 "playback_error" = "Ошибка воспроизведения";
 "no_video_id" = "Элемент без videoId";
 "up_next" = "Далее";
+"play" = "Слушать";
+"pause" = "Пауза";
 "songs_count_single" = "%lu трек";
 "songs_count_plural" = "%lu треков";
 
@@ -226,4 +228,17 @@
 "theme_accent_color_sub" = "Палитра Material Design 3";
 "enabled" = "Включено";
 "disabled" = "Выключено";
+
+/* Account & Settings Additions */
+"logout_confirm_title" = "Выйти из YouTube Music?";
+"logout_clear" = "Выйти и очистить данные";
+"logout_keep" = "Выйти (сохранить загрузки)";
+"account_guest" = "Гость";
+"account_guest_sub" = "Войдите для синхронизации плейлистов и лайков";
+"action_login" = "Войти";
+"storage_section" = "Хранилище и настройки";
+"about_section" = "О приложении";
+"about_title" = "MetroLegacy";
+"about_sub" = "Вдохновлено MetroList от vfsfitvnm";
+"about_details" = "v1.0.0 • Клиент YouTube Music для iOS 6+";
 

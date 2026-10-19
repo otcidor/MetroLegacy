@@ -13,6 +13,7 @@
 #import "MLAccountSettingsViewController.h"
 #import "MLLocalization.h"
 #import "MLRootViewController.h"
+#import "MLBottomSheet.h"
 #import <QuartzCore/QuartzCore.h>
 
 typedef enum {
@@ -444,6 +445,8 @@ typedef enum {
 
 - (void)dealloc
 {
+	_table.dataSource = nil;
+	_table.delegate = nil;
 	[[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -593,17 +596,36 @@ typedef enum {
 - (void)sortTapped:(id)sender
 {
 	[MLTheme triggerImpactHaptic];
-	UIActionSheet *sheet = [[UIActionSheet alloc] initWithTitle:MLLocalizedString(@"sort_by", nil)
-	                                                   delegate:self
-	                                          cancelButtonTitle:MLLocalizedString(@"cancel", nil)
-	                                     destructiveButtonTitle:nil
-	                                          otherButtonTitles:
-	                                              MLLocalizedString(@"sort_recent", nil),
-	                                              MLLocalizedString(@"sort_name", nil),
-	                                              MLLocalizedString(@"sort_artist", nil),
-	                                              nil];
-	sheet.tag = 601;
-	[sheet showInView:self.view];
+	__weak MLLibraryViewController *wself = self;
+
+	NSArray *titles = @[
+		MLLocalizedString(@"sort_recent", nil),
+		MLLocalizedString(@"sort_name", nil),
+		MLLocalizedString(@"sort_artist", nil)
+	];
+	NSArray *icons = @[@"history", @"sort", @"person"];
+
+	NSMutableArray *items = [NSMutableArray array];
+	for (NSUInteger i = 0; i < titles.count; i++) {
+		BOOL isSel = (_sortOrder == (MLLibSortOrder)i);
+		MLBottomSheetItem *it = [MLBottomSheetItem radioItemWithTitle:titles[i]
+		                                                     subtitle:nil
+		                                                     selected:isSel
+		                                                      handler:^{
+			MLLibraryViewController *sself = wself;
+			if (!sself) return;
+			sself->_sortOrder = (MLLibSortOrder)i;
+			[[NSUserDefaults standardUserDefaults] setInteger:sself->_sortOrder forKey:@"ml_lib_sort_order"];
+			[[NSUserDefaults standardUserDefaults] synchronize];
+			[sself updateSortButtonTitle];
+			[sself rebuildSections];
+		}];
+		it.iconName = icons[i];
+		[items addObject:it];
+	}
+
+	MLBottomSheetMenu *menu = [MLBottomSheetMenu menuWithTitle:MLLocalizedString(@"sort_by", nil) items:items];
+	[menu showInView:self.view];
 }
 
 - (void)populateFilterChips
@@ -760,26 +782,34 @@ typedef enum {
 	NSString *title = entry[@"title"] ?: @"";
 	NSArray *songs = [self songsForCollectionType:type];
 
-	UIActionSheet *sheet = [[UIActionSheet alloc] initWithTitle:title
-	                                                   delegate:self
-	                                          cancelButtonTitle:nil
-	                                     destructiveButtonTitle:nil
-	                                          otherButtonTitles:nil];
-	sheet.tag = 701;
-	_selectedMenuCollectionEntry = entry;
-
+	NSMutableArray *items = [NSMutableArray array];
 	if (songs.count > 0) {
-		[sheet addButtonWithTitle:MLLocalizedString(@"play_all", nil)];
-		[sheet addButtonWithTitle:MLLocalizedString(@"shuffle_all", nil)];
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"play_all", nil)
+		                                         iconName:@"play_arrow"
+		                                          handler:^{
+			[[MLPlaybackManager sharedManager] playQueue:songs startIndex:0];
+		}]];
+
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"shuffle_all", nil)
+		                                         iconName:@"shuffle"
+		                                          handler:^{
+			[[MLPlaybackManager sharedManager] playShuffledQueue:songs];
+		}]];
 	}
 	if ([type isEqualToString:@"cached"] && [MLLibraryManager sharedManager].cachedSongs.count > 0) {
-		[sheet addButtonWithTitle:MLLocalizedString(@"clear_cache", nil)];
+		__weak MLLibraryViewController *wself = self;
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"clear_cache", nil)
+		                                         subtitle:nil
+		                                         iconName:@"delete"
+		                                    isDestructive:YES
+		                                          handler:^{
+			[[MLLibraryManager sharedManager] clearAudioCache];
+			[wself rebuildSections];
+		}]];
 	}
 
-	NSInteger cancelIdx = [sheet addButtonWithTitle:MLLocalizedString(@"cancel", nil)];
-	sheet.cancelButtonIndex = cancelIdx;
-
-	[sheet showInView:self.view];
+	MLBottomSheetMenu *menu = [MLBottomSheetMenu menuWithTitle:title items:items];
+	[menu showInView:self.view];
 }
 
 - (NSArray *)autoPlaylistCards
@@ -1130,18 +1160,29 @@ typedef enum {
 	} else if ([type isEqualToString:@"clear_cache"]) {
 		[[MLLibraryManager sharedManager] clearAudioCache];
 	} else if ([type isEqualToString:@"language"]) {
-		UIActionSheet *sheet = [[UIActionSheet alloc] initWithTitle:MLLocalizedString(@"select_language", nil)
-		                                                   delegate:self
-		                                          cancelButtonTitle:MLLocalizedString(@"cancel", nil)
-		                                     destructiveButtonTitle:nil
-		                                          otherButtonTitles:
-		                                              MLLocalizedString(@"lang_auto", nil),
-		                                              MLLocalizedString(@"lang_es", nil),
-		                                              MLLocalizedString(@"lang_en", nil),
-		                                              MLLocalizedString(@"lang_ru", nil),
-		                                              nil];
-		sheet.tag = 602;
-		[sheet showInView:self.view];
+		NSString *currentPref = [MLLocalization sharedManager].languagePreference ?: @"system";
+		NSArray *codes = @[@"system", @"es", @"en", @"ru"];
+		NSArray *names = @[
+			MLLocalizedString(@"lang_system", nil),
+			MLLocalizedString(@"lang_es", nil),
+			MLLocalizedString(@"lang_en", nil),
+			MLLocalizedString(@"lang_ru", nil)
+		];
+		NSMutableArray *items = [NSMutableArray array];
+		for (NSUInteger i = 0; i < codes.count; i++) {
+			NSString *code = codes[i];
+			BOOL isSel = [currentPref isEqualToString:code];
+			MLBottomSheetItem *it = [MLBottomSheetItem radioItemWithTitle:names[i]
+			                                                     subtitle:nil
+			                                                     selected:isSel
+			                                                      handler:^{
+				[[MLLocalization sharedManager] setLanguagePreference:code];
+			}];
+			it.iconName = @"language";
+			[items addObject:it];
+		}
+		MLBottomSheetMenu *menu = [MLBottomSheetMenu menuWithTitle:MLLocalizedString(@"select_language", nil) items:items];
+		[menu showInView:self.view];
 	} else if ([type isEqualToString:@"logout"]) {
 		[[MLInnerTube sharedClient] clearSession];
 		[self reloadData];

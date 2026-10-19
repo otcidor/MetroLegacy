@@ -113,6 +113,8 @@
 
 - (void)dealloc
 {
+	_tableView.dataSource = nil;
+	_tableView.delegate = nil;
 	[[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 

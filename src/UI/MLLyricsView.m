@@ -100,6 +100,12 @@
 	return self;
 }
 
+- (void)dealloc
+{
+	_tableView.dataSource = nil;
+	_tableView.delegate = nil;
+}
+
 - (void)layoutSubviews
 {
 	[super layoutSubviews];
@@ -133,7 +139,7 @@
                   duration:(CGFloat)duration
                    videoId:(NSString *)videoId
 {
-	if ([videoId isEqualToString:_currentVideoId] && _lines.count > 0) {
+	if (!videoId.length || [videoId isEqualToString:_currentVideoId]) {
 		return;
 	}
 

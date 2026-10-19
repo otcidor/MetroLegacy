@@ -37,6 +37,7 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 
 	NSMutableDictionary *_playCounts;
 	NSMutableDictionary *_playHistoryMap;
+	NSArray *_cachedTop50;
 
 	NSString *_libraryPlistPath;
 	NSString *_downloadsDir;
@@ -109,10 +110,14 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 		                                           object:nil];
 
 		if ([[MLInnerTube sharedClient] loggedIn]) {
-			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
 				[self syncWithYouTubeMusicCompletion:nil];
 			});
 		}
+
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+			[self pruneCorruptAudioFilesAsync];
+		});
 	}
 	return self;
 }
@@ -211,11 +216,9 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 	for (MLYTItem *it in [self deserializeItems:dlRaw]) {
 		if (!it.videoId.length) continue;
 		NSString *path = [_downloadsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.m4a", it.videoId]];
-		if ([self isValidLocalAudioFileAtPath:path]) {
+		if ([fm fileExistsAtPath:path]) {
 			[_downloadedSongs addObject:it];
 			[_downloadedIds addObject:it.videoId];
-		} else {
-			[fm removeItemAtPath:path error:nil];
 		}
 	}
 
@@ -225,18 +228,63 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 	for (MLYTItem *it in [self deserializeItems:cacheRaw]) {
 		if (!it.videoId.length) continue;
 		NSString *path = [_cacheDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.m4a", it.videoId]];
-		if ([self isValidLocalAudioFileAtPath:path]) {
+		if ([fm fileExistsAtPath:path]) {
 			[_cachedSongs addObject:it];
 			[_cachedIds addObject:it.videoId];
-		} else {
-			[fm removeItemAtPath:path error:nil];
 		}
 	}
+	_cachedTop50 = nil;
 	[_lock unlock];
+}
+
+- (void)pruneCorruptAudioFilesAsync
+{
+	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+		[self->_lock lock];
+		NSArray *dlCopy = [self->_downloadedSongs copy];
+		NSArray *cacheCopy = [self->_cachedSongs copy];
+		[self->_lock unlock];
+
+		NSFileManager *fm = [NSFileManager defaultManager];
+		BOOL changed = NO;
+
+		for (MLYTItem *it in dlCopy) {
+			if (!it.videoId.length) continue;
+			NSString *path = [self->_downloadsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.m4a", it.videoId]];
+			if (![self isValidLocalAudioFileAtPath:path]) {
+				[fm removeItemAtPath:path error:nil];
+				[self->_lock lock];
+				[self->_downloadedSongs removeObject:it];
+				[self->_downloadedIds removeObject:it.videoId];
+				[self saveDownloadsIndexLocked];
+				[self->_lock unlock];
+				changed = YES;
+			}
+		}
+
+		for (MLYTItem *it in cacheCopy) {
+			if (!it.videoId.length) continue;
+			NSString *path = [self->_cacheDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.m4a", it.videoId]];
+			if (![self isValidLocalAudioFileAtPath:path]) {
+				[fm removeItemAtPath:path error:nil];
+				[self->_lock lock];
+				[self->_cachedSongs removeObject:it];
+				[self->_cachedIds removeObject:it.videoId];
+				[self saveCacheIndexLocked];
+				[self->_lock unlock];
+				changed = YES;
+			}
+		}
+
+		if (changed) {
+			[self notifyUpdate];
+		}
+	});
 }
 
 - (void)saveLibraryStateLocked
 {
+	_cachedTop50 = nil;
 	NSMutableDictionary *state = [NSMutableDictionary dictionary];
 	state[@"likedSongs"] = [self serializeItems:_likedSongs];
 	state[@"syncedLikedIds"] = [_syncedLikedIds allObjects] ?: @[];
@@ -332,20 +380,24 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 - (NSArray *)top50Songs
 {
 	[_lock lock];
+	if (_cachedTop50) {
+		NSArray *res = _cachedTop50;
+		[_lock unlock];
+		return res;
+	}
+
+	NSMutableDictionary *lookup = [NSMutableDictionary dictionaryWithCapacity:_historySongs.count + _likedSongs.count];
+	for (MLYTItem *l in _likedSongs) {
+		if (l.videoId.length) lookup[l.videoId] = l;
+	}
+	for (MLYTItem *h in _historySongs) {
+		if (h.videoId.length) lookup[h.videoId] = h;
+	}
+
 	NSMutableArray *pairs = [NSMutableArray array];
 	for (NSString *vid in [_playCounts allKeys]) {
 		NSDictionary *dict = _playHistoryMap[vid];
-		MLYTItem *item = dict ? [MLYTItem itemFromDictionary:dict] : nil;
-		if (!item) {
-			for (MLYTItem *h in _historySongs) {
-				if ([h.videoId isEqualToString:vid]) { item = h; break; }
-			}
-			if (!item) {
-				for (MLYTItem *l in _likedSongs) {
-					if ([l.videoId isEqualToString:vid]) { item = l; break; }
-				}
-			}
-		}
+		MLYTItem *item = dict ? [MLYTItem itemFromDictionary:dict] : lookup[vid];
 		if (item && item.videoId.length) {
 			NSUInteger cnt = [_playCounts[vid] unsignedIntegerValue];
 			[pairs addObject:@{ @"item" : item, @"count" : @(cnt) }];
@@ -390,7 +442,8 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 		}
 	}
 
-	NSArray *result = [top copy];
+	_cachedTop50 = [top copy];
+	NSArray *result = _cachedTop50;
 	[_lock unlock];
 	return result;
 }

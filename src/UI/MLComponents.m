@@ -46,6 +46,7 @@
 
 - (void)dealloc
 {
+	_scroll.delegate = nil;
 	[[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -836,6 +837,11 @@
 		[self.contentView addSubview:_pageControl];
 	}
 	return self;
+}
+
+- (void)dealloc
+{
+	_scroll.delegate = nil;
 }
 
 + (CGFloat)heightForWidth:(CGFloat)width
