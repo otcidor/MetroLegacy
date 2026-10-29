@@ -1,6 +1,7 @@
 #import "MLInnerTube.h"
 #import "MLYouTubeStream.h"
 #import "MLTLSTrustManager.h"
+#import "../Core/MLLibraryManager.h"
 #import <CommonCrypto/CommonDigest.h>
 
 static NSString *const MLAPIBase = @"https://music.youtube.com/youtubei/v1/";
@@ -1328,20 +1329,20 @@ id MLPath(id root, NSString *keyPath)
 	}];
 }
 
-- (void)likedSongsWithCompletion:(void (^)(NSDictionary *header, NSArray *tracks, NSString *next, NSString *err))completion
+- (void)likedSongsWithContinuation:(NSString *)continuation
+                        completion:(void (^)(NSDictionary *header, NSArray *tracks, NSString *next, NSString *err))completion
 {
 	if (!self.loggedIn) {
 		if (completion)
 			completion(nil, nil, nil, @"Inicia sesión para ver tus canciones gustadas");
 		return;
 	}
-	[self fetchPlaylistPagesWithId:@"VLLM"
-	                  continuation:nil
-	                   accumHeader:nil
-	                   accumTracks:[NSMutableArray array]
-	                       seenIds:[NSMutableSet set]
-	                     remaining:5
-	                    completion:completion];
+	[self playlistWithId:@"VLLM" continuation:continuation completion:completion];
+}
+
+- (void)likedSongsWithCompletion:(void (^)(NSDictionary *header, NSArray *tracks, NSString *next, NSString *err))completion
+{
+	[self likedSongsWithContinuation:nil completion:completion];
 }
 
 - (void)fetchLibraryPagesWithBrowseId:(NSString *)browseId
@@ -1602,6 +1603,18 @@ id MLPath(id root, NSString *keyPath)
 				if (completion) completion(nil, nil, err ?: @"Error al obtener recomendaciones");
 			}
 			return;
+		}
+
+		// Detect real-time likeStatus from response for current video or queued items
+		for (NSDictionary *lb in [MLInnerTube allObjectsForKey:@"likeButtonRenderer" inObject:resp maxDepth:15]) {
+			NSString *targetVid = MLPath(lb, @"target.videoId") ?: MLPath(lb, @"target.likeTarget.videoId");
+			if (!targetVid.length && videoId.length) targetVid = videoId;
+			NSString *status = lb[@"likeStatus"];
+			if (targetVid.length > 0 && [status isKindOfClass:[NSString class]]) {
+				if ([status isEqualToString:@"LIKE"]) {
+					[[MLLibraryManager sharedManager] markSongId:targetVid asLiked:YES];
+				}
+			}
 		}
 
 		NSString *queueTitle = accumTitle;

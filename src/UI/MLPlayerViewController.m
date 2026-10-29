@@ -11,6 +11,8 @@
 #import "MLLocalization.h"
 #import "MLLyricsView.h"
 #import "MLSponsorBlockManager.h"
+#import "MLEqualizerViewController.h"
+#import "MLEqualizerManager.h"
 #import <QuartzCore/QuartzCore.h>
 
 /*
@@ -157,6 +159,7 @@ static CGPathRef MLCreateRoundedRectPath(CGRect rect, CGFloat tl, CGFloat tr, CG
 	CAGradientLayer *_bgGradient;
 	UIView *_dragHandle;
 	UIButton *_closeButton;
+	UIButton *_eqButton;
 	UILabel *_headerSubtitleLabel;
 	UILabel *_headerTitleLabel;
 
@@ -236,6 +239,12 @@ static CGPathRef MLCreateRoundedRectPath(CGRect rect, CGFloat tl, CGFloat tr, CG
 	[_closeButton setImage:[MLIcon icon:@"expand_more" size:28.0f color:[MLTheme onSurface]] forState:UIControlStateNormal];
 	[_closeButton addTarget:self action:@selector(closeTap:) forControlEvents:UIControlEventTouchUpInside];
 	[self.view addSubview:_closeButton];
+
+	// Equalizer Button (Top Right Header)
+	_eqButton = [UIButton buttonWithType:UIButtonTypeCustom];
+	[_eqButton setImage:[MLIcon icon:@"equalizer" size:24.0f color:[MLTheme onSurface]] forState:UIControlStateNormal];
+	[_eqButton addTarget:self action:@selector(eqTap:) forControlEvents:UIControlEventTouchUpInside];
+	[self.view addSubview:_eqButton];
 
 	// Header Subtitle: "NOW PLAYING"
 	_headerSubtitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -517,8 +526,9 @@ static CGPathRef MLCreateRoundedRectPath(CGRect rect, CGFloat tl, CGFloat tr, CG
 	CGFloat topY = topInset + (isCompact ? 4.0f : 10.0f);
 	CGFloat closeBtnSize = isCompact ? 34.0f : 38.0f;
 	_closeButton.frame = CGRectMake(14.0f, topY, closeBtnSize, closeBtnSize);
+	_eqButton.frame = CGRectMake(W - 14.0f - closeBtnSize, topY, closeBtnSize, closeBtnSize);
 
-	CGFloat headerTextW = W - 100.0f;
+	CGFloat headerTextW = W - (14.0f + closeBtnSize + 8.0f) * 2.0f;
 	_headerSubtitleLabel.frame = CGRectMake((W - headerTextW) / 2.0f, topY + 2.0f, headerTextW, 14.0f);
 	_headerTitleLabel.frame = CGRectMake((W - headerTextW) / 2.0f, topY + 18.0f, headerTextW, 18.0f);
 	CGFloat headerBottom = topY + (isCompact ? 36.0f : 40.0f);
@@ -681,6 +691,22 @@ static CGPathRef MLCreateRoundedRectPath(CGRect rect, CGFloat tl, CGFloat tr, CG
 	                                         selector:@selector(themeChanged:)
 	                                             name:MLThemeDidChangeNotification
 	                                           object:nil];
+	[[NSNotificationCenter defaultCenter] addObserver:self
+	                                         selector:@selector(equalizerChanged:)
+	                                             name:MLEqualizerDidChangeNotification
+	                                           object:nil];
+}
+
+- (void)equalizerChanged:(NSNotification *)note
+{
+	[self updateEqualizerButtonState];
+}
+
+- (void)updateEqualizerButtonState
+{
+	BOOL eqOn = [MLEqualizerManager sharedManager].enabled;
+	UIColor *col = eqOn ? [MLTheme primary] : [MLTheme onSurface];
+	[_eqButton setImage:[MLIcon icon:@"equalizer" size:24.0f color:col] forState:UIControlStateNormal];
 }
 
 - (void)themeChanged:(NSNotification *)note
@@ -688,6 +714,7 @@ static CGPathRef MLCreateRoundedRectPath(CGRect rect, CGFloat tl, CGFloat tr, CG
 	self.view.backgroundColor = [MLTheme background];
 	_seekBar.minimumTrackTintColor = [MLTheme primary];
 	_seekBar.thumbTintColor = [MLTheme primary];
+	[self updateEqualizerButtonState];
 	[self reload];
 }
 
@@ -745,6 +772,7 @@ static CGPathRef MLCreateRoundedRectPath(CGRect rect, CGFloat tl, CGFloat tr, CG
 {
 	[super viewWillAppear:animated];
 	_viewIsVisible = YES;
+	[self updateEqualizerButtonState];
 	[self reload];
 }
 
@@ -787,6 +815,13 @@ static CGPathRef MLCreateRoundedRectPath(CGRect rect, CGFloat tl, CGFloat tr, CG
 	_viewIsVisible = NO;
 	if (_delegate && [_delegate respondsToSelector:@selector(playerViewControllerDidClose:)])
 		[_delegate playerViewControllerDidClose:self];
+}
+
+- (void)eqTap:(UIButton *)sender
+{
+	[MLTheme triggerImpactHaptic];
+	MLEqualizerViewController *eqVC = [[MLEqualizerViewController alloc] init];
+	[self presentViewController:eqVC animated:YES completion:nil];
 }
 
 - (void)moreTap:(UIButton *)sender

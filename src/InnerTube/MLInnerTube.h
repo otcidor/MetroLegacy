@@ -102,6 +102,8 @@ extern NSString *const MLSessionChangedNotification;
 
 // Liked songs (login required).
 - (void)likedSongsWithCompletion:(void (^)(NSDictionary *header, NSArray *tracks, NSString *nextContinuation, NSString *error))completion;
+- (void)likedSongsWithContinuation:(NSString *)continuation
+                        completion:(void (^)(NSDictionary *header, NSArray *tracks, NSString *nextContinuation, NSString *error))completion;
 
 // Fetch any YouTube Music library browseId (FEmusic_liked_playlists, FEmusic_liked_videos, FEmusic_liked_albums, FEmusic_library_corpus_artists, FEmusic_history).
 - (void)libraryWithBrowseId:(NSString *)browseId
@@ -189,5 +191,7 @@ extern NSString *const MLSearchFilterPlaylists;
 + (NSString *)continuationFromResponseOrShelf:(id)obj;
 
 + (NSDictionary *)headerInfoFromResponse:(NSDictionary *)response;
++ (NSUInteger)trackCountFromText:(NSString *)text;
++ (NSUInteger)trackCountFromHeader:(NSDictionary *)header;
 
 @end

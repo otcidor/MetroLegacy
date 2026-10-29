@@ -432,7 +432,15 @@
 
 - (void)dismissAnimated:(BOOL)animated
 {
-	if (_dismissing) return;
+	[self dismissAnimated:animated completion:nil];
+}
+
+- (void)dismissAnimated:(BOOL)animated completion:(void (^)(void))completionBlock
+{
+	if (_dismissing) {
+		if (completionBlock) completionBlock();
+		return;
+	}
 	_dismissing = YES;
 
 	void (^animations)(void) = ^{
@@ -440,13 +448,16 @@
 		self->_containerView.frame = CGRectMake(0, self.bounds.size.height, self.bounds.size.width, self->_sheetHeight);
 	};
 
-	void (^completion)(BOOL) = ^(BOOL finished) {
+	void (^comp)(BOOL) = ^(BOOL finished) {
 		[self removeFromSuperview];
+		if (completionBlock) {
+			completionBlock();
+		}
 	};
 
 	if (!animated) {
 		animations();
-		completion(YES);
+		comp(YES);
 		return;
 	}
 
@@ -454,7 +465,7 @@
 	                      delay:0
 	                    options:UIViewAnimationOptionCurveEaseIn
 	                 animations:animations
-	                 completion:completion];
+	                 completion:comp];
 }
 
 - (void)scrimTap:(UITapGestureRecognizer *)tap
@@ -533,10 +544,11 @@
 	[MLTheme triggerImpactHaptic];
 	MLBottomSheetItem *it = _items[indexPath.row];
 	void (^handler)(void) = it.handler;
-	[self dismissAnimated:YES];
-	if (handler) {
-		handler();
-	}
+	[self dismissAnimated:YES completion:^{
+		if (handler) {
+			handler();
+		}
+	}];
 }
 
 @end

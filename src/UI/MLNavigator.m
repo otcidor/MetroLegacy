@@ -6,6 +6,7 @@
 #import "MLLocalization.h"
 #import "MLPlaybackManager.h"
 #import "MLBottomSheet.h"
+#import "MLEqualizerViewController.h"
 #import <objc/runtime.h>
 
 static const char *const MLSongMenuActionTargetKey = "ml.songmenu.target";
@@ -127,6 +128,19 @@ static const char *const MLSongMenuActionTargetKey = "ml.songmenu.target";
 		[self presentSleepTimerPicker];
 		objc_setAssociatedObject(actionSheet, MLSongMenuActionTargetKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 		return;
+	} else if ([act isEqualToString:@"equalizer"]) {
+		dispatch_async(dispatch_get_main_queue(), ^{
+			MLEqualizerViewController *eqVC = [[MLEqualizerViewController alloc] init];
+			if (self->_viewController.navigationController) {
+				[self->_viewController.navigationController pushViewController:eqVC animated:YES];
+			} else {
+				UIViewController *presenter = self->_viewController;
+				while (presenter.presentedViewController && !presenter.presentedViewController.isBeingDismissed) {
+					presenter = presenter.presentedViewController;
+				}
+				[presenter presentViewController:eqVC animated:YES completion:nil];
+			}
+		});
 	}
 
 	objc_setAssociatedObject(actionSheet, MLSongMenuActionTargetKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -162,11 +176,12 @@ static const char *const MLSongMenuActionTargetKey = "ml.songmenu.target";
 	NSArray *playlists = [MLLibraryManager sharedManager].syncedPlaylists ?: @[];
 	NSMutableArray *items = [NSMutableArray array];
 
+	NSString *targetVid = _item.videoId;
 	for (MLYTItem *pl in playlists) {
 		NSString *pid = pl.playlistId ?: pl.browseId;
 		[items addObject:[MLBottomSheetItem itemWithTitle:pl.title ?: @"Playlist" iconName:@"playlist_play" handler:^{
-			if (pid.length && self->_item.videoId.length) {
-				[[MLInnerTube sharedClient] addVideoId:self->_item.videoId toPlaylistId:pid completion:nil];
+			if (pid.length && targetVid.length) {
+				[[MLInnerTube sharedClient] addVideoId:targetVid toPlaylistId:pid completion:nil];
 			}
 		}]];
 	}
@@ -410,6 +425,22 @@ static const char *const MLSongMenuActionTargetKey = "ml.songmenu.target";
 	}
 	[items addObject:[MLBottomSheetItem itemWithTitle:timerTitle iconName:@"bedtime" handler:^{
 		[handler presentSleepTimerPicker];
+	}]];
+
+	// Equalizer
+	[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"equalizer_title", nil) iconName:@"equalizer" handler:^{
+		dispatch_async(dispatch_get_main_queue(), ^{
+			MLEqualizerViewController *eqVC = [[MLEqualizerViewController alloc] init];
+			if (vc.navigationController) {
+				[vc.navigationController pushViewController:eqVC animated:YES];
+			} else {
+				UIViewController *presenter = vc;
+				while (presenter.presentedViewController && !presenter.presentedViewController.isBeingDismissed) {
+					presenter = presenter.presentedViewController;
+				}
+				[presenter presentViewController:eqVC animated:YES completion:nil];
+			}
+		});
 	}]];
 
 	NSString *subtitle = item.artists.count ? [item.artists componentsJoinedByString:@", "] : (item.subtitle ?: @"");

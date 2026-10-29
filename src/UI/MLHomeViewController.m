@@ -407,25 +407,28 @@
 			}
 		}
 	}
+	__weak typeof(self) wself = self;
 	[[MLInnerTube sharedClient] homeFeedWithParams:params completion:^(NSArray *sections, NSArray *chips, NSString *error) {
-		_loading = NO;
-		[_spinner stopAnimating];
-		[_refreshControl endRefreshing];
+		MLHomeViewController *s = wself;
+		if (!s) return;
+		s->_loading = NO;
+		[s->_spinner stopAnimating];
+		[s->_refreshControl endRefreshing];
 		if (error) {
-			[MLTheme setLeftNavigationTitle:MLLocalizedString(@"home_network_error", nil) forViewController:self];
+			[MLTheme setLeftNavigationTitle:MLLocalizedString(@"home_network_error", nil) forViewController:s];
 			return;
 		}
-		[MLTheme setLeftNavigationTitle:MLLocalizedString(@"home_title", nil) forViewController:self];
-		[_sections removeAllObjects];
-		[_sections addObjectsFromArray:sections ?: @[]];
-		[self rebuildSynthesizedHomeSections];
-		if (chips.count > 0 && _selectedParams == nil) {
-			[_chips removeAllObjects];
-			[_chips addObjectsFromArray:chips];
-			[_chipsRow setChips:_chips];
-			[_chipsRow setSelectedIndex:_selectedChip];
+		[MLTheme setLeftNavigationTitle:MLLocalizedString(@"home_title", nil) forViewController:s];
+		[s->_sections removeAllObjects];
+		[s->_sections addObjectsFromArray:sections ?: @[]];
+		[s rebuildSynthesizedHomeSections];
+		if (chips.count > 0 && s->_selectedParams == nil) {
+			[s->_chips removeAllObjects];
+			[s->_chips addObjectsFromArray:chips];
+			[s->_chipsRow setChips:s->_chips];
+			[s->_chipsRow setSelectedIndex:s->_selectedChip];
 		}
-		[_table reloadData];
+		[s->_table reloadData];
 	}];
 }
 

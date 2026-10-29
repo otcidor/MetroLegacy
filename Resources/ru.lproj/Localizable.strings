@@ -48,7 +48,9 @@
 "language" = "Язык";
 "language_sub" = "Русский";
 "select_language" = "Выберите язык";
+"language_select_title" = "Выберите язык";
 "lang_auto" = "Автоматически (Система)";
+"lang_system" = "По умолчанию";
 "lang_es" = "Español";
 "lang_en" = "English";
 "lang_ru" = "Русский";
@@ -79,6 +81,9 @@
 /* Login */
 "login_title" = "Вход";
 "login_loading" = "Загрузка music.youtube.com…";
+"login_ready" = "Страница загружена";
+"login_error" = "Ошибка загрузки страницы";
+"login_incomplete" = "Сначала войдите в свой аккаунт";
 "done" = "Готово";
 "login_detected" = "Сессия обнаружена. Нажмите Готово.";
 "login_prompt" = "Войдите на странице. (Требуется Web Port)";
@@ -241,4 +246,23 @@
 "about_title" = "MetroLegacy";
 "about_sub" = "Вдохновлено MetroList от vfsfitvnm";
 "about_details" = "v1.0.0 • Клиент YouTube Music для iOS 6+";
+
+/* Equalizer */
+"equalizer_title" = "Эквалайзер";
+"equalizer_enable" = "Включить эквалайзер";
+"equalizer_reset" = "Сбросить";
+"equalizer_hint" = "Настройте звуковые частоты в реальном времени.";
+"eq_preset_flat" = "Плоский";
+"eq_preset_bass_boost" = "Усиление басов";
+"eq_preset_bass_reducer" = "Подавление басов";
+"eq_preset_treble_boost" = "Усиление ВЧ";
+"eq_preset_treble_reducer" = "Подавление ВЧ";
+"eq_preset_vocal" = "Вокал";
+"eq_preset_rock" = "Рок";
+"eq_preset_pop" = "Поп";
+"eq_preset_electronic" = "Электронная";
+"eq_preset_hiphop" = "Хип-хоп";
+"eq_preset_jazz" = "Джаз";
+"eq_preset_classical" = "Классика";
+"eq_preset_custom" = "Пользовательский";
 

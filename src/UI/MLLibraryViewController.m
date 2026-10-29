@@ -750,8 +750,15 @@ typedef enum {
 
 - (NSString *)songsCountSubtitle:(NSUInteger)count
 {
+	static NSNumberFormatter *formatter = nil;
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		formatter = [[NSNumberFormatter alloc] init];
+		formatter.numberStyle = NSNumberFormatterDecimalStyle;
+	});
+	NSString *numStr = [formatter stringFromNumber:@(count)] ?: [NSString stringWithFormat:@"%lu", (unsigned long)count];
 	NSString *fmt = (count == 1) ? MLLocalizedString(@"songs_count_single", nil) : MLLocalizedString(@"songs_count_plural", nil);
-	return [NSString stringWithFormat:fmt, (unsigned long)count];
+	return [fmt stringByReplacingOccurrencesOfString:@"%lu" withString:numStr];
 }
 
 - (NSString *)firstThumbnailInSongs:(NSArray *)songs
@@ -815,7 +822,7 @@ typedef enum {
 - (NSArray *)autoPlaylistCards
 {
 	MLLibraryManager *lib = [MLLibraryManager sharedManager];
-	NSUInteger likedCount = lib.likedSongs.count;
+	NSUInteger likedCount = lib.totalLikedSongsCount > 0 ? lib.totalLikedSongsCount : lib.likedSongs.count;
 	NSUInteger top50Count = lib.top50Songs.count;
 	NSUInteger dlCount = lib.downloadedSongs.count;
 	NSUInteger cacheCount = lib.cachedSongs.count;

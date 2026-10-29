@@ -590,17 +590,38 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	if (!remoteStreamURL)
 		return nil;
 
-	// Local file URLs (downloaded/cached songs) are played directly by AVPlayer
-	if (remoteStreamURL.isFileURL) {
-		return remoteStreamURL;
-	}
-
 	[self reviveListenerKeepingPort];
 
 	[_lock lock];
 	_generation++;
 	NSString *streamId = [NSString stringWithFormat:@"%lu", (unsigned long)_generation];
 	_urlMap[streamId] = remoteStreamURL;
+
+	// For local downloaded or cached files, pre-populate total length from file attributes
+	if (remoteStreamURL.isFileURL) {
+		NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:[remoteStreamURL path] error:nil];
+		if (attrs && [attrs fileSize] > 0) {
+			_totalLengthMap[streamId] = @([attrs fileSize]);
+		}
+	}
+
+	// Keep cache size bounded to prevent memory growth across long playback sessions
+	if (_urlMap.count > 12) {
+		NSMutableArray *toRemove = [NSMutableArray array];
+		for (NSString *key in _urlMap.allKeys) {
+			NSUInteger keyGen = (NSUInteger)[key integerValue];
+			if (keyGen + 10 < _generation) {
+				[toRemove addObject:key];
+			}
+		}
+		for (NSString *oldKey in toRemove) {
+			[_urlMap removeObjectForKey:oldKey];
+			[_totalLengthMap removeObjectForKey:oldKey];
+			[_segmentsMap removeObjectForKey:oldKey];
+			[_playlistMap removeObjectForKey:oldKey];
+			[_timescaleMap removeObjectForKey:oldKey];
+		}
+	}
 	[_lock unlock];
 
 	BOOL useHls = ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f);
@@ -840,6 +861,27 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 		if (!cachedPlaylist.length) {
 			NSHTTPURLResponse *httpResp = nil;
 			NSData *headerData = [self fetchRangeStart:0 end:65535 fromURL:remoteURL httpResponse:&httpResp];
+
+			// Ensure full sidx box is loaded if it extends beyond 64KB
+			if (headerData.length >= 8) {
+				const uint8_t *hBytes = (const uint8_t *)headerData.bytes;
+				size_t hLen = headerData.length;
+				for (size_t i = 4; i + 8 <= hLen; i++) {
+					if (hBytes[i] == 's' && hBytes[i+1] == 'i' && hBytes[i+2] == 'd' && hBytes[i+3] == 'x') {
+						size_t sBoxStart = i - 4;
+						uint32_t bSz = ((uint32_t)hBytes[sBoxStart] << 24) | ((uint32_t)hBytes[sBoxStart+1] << 16) |
+						               ((uint32_t)hBytes[sBoxStart+2] << 8) | (uint32_t)hBytes[sBoxStart+3];
+						if (bSz >= 32 && sBoxStart + bSz > hLen) {
+							long long neededEnd = (long long)(sBoxStart + bSz + 16);
+							NSData *fullHeader = [self fetchRangeStart:0 end:neededEnd fromURL:remoteURL httpResponse:&httpResp];
+							if (fullHeader.length > headerData.length) {
+								headerData = fullHeader;
+							}
+						}
+						break;
+					}
+				}
+			}
 
 			uint32_t timescale = 44100;
 			NSArray *segments = MLParseSidxSegments(headerData, &timescale);

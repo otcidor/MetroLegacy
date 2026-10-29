@@ -17,6 +17,9 @@ extern NSString *const MLLibraryDidUpdateNotification;
 @property (nonatomic, readonly) NSArray *cachedSongs;      // MLYTItem
 @property (nonatomic, readonly) NSArray *top50Songs;        // MLYTItem
 
+@property (nonatomic, readonly) NSUInteger totalLikedSongsCount;
+@property (nonatomic, readonly) NSString *likedSongsContinuation;
+
 @property (nonatomic, readonly, getter=isSyncing) BOOL syncing;
 @property (nonatomic, readonly) NSDate *lastSyncDate;
 
@@ -26,6 +29,10 @@ extern NSString *const MLLibraryDidUpdateNotification;
 // Likes
 - (BOOL)isSongLiked:(NSString *)videoId;
 - (void)toggleLikeForSong:(MLYTItem *)song completion:(void (^)(BOOL isLiked, NSString *error))completion;
+- (void)markSongId:(NSString *)videoId asLiked:(BOOL)liked;
+- (void)markSong:(MLYTItem *)song asLiked:(BOOL)liked;
+- (void)appendLikedSongs:(NSArray *)songs nextContinuation:(NSString *)next;
+- (void)setLikedSongs:(NSArray *)songs header:(NSDictionary *)header nextContinuation:(NSString *)next;
 
 // History
 - (void)recordPlayedSong:(MLYTItem *)song;

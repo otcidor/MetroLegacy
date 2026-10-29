@@ -4,6 +4,7 @@
 #import "MLStreamRelay.h"
 #import "MLLibraryManager.h"
 #import "MLSponsorBlockManager.h"
+#import "MLEqualizerManager.h"
 #import "MLLocalization.h"
 #import <MediaPlayer/MediaPlayer.h>
 
@@ -416,12 +417,16 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 {
 	if (_observedItem) {
 		[_observedItem removeObserver:self forKeyPath:@"status"];
+		_observedItem.audioMix = nil;
 		_observedItem = nil;
 	}
 	if (_player) {
 		if (_timeObserver) {
 			[_player removeTimeObserver:_timeObserver];
 			_timeObserver = nil;
+		}
+		if (_player.currentItem) {
+			_player.currentItem.audioMix = nil;
 		}
 		[_player pause];
 		_player = nil;
@@ -479,6 +484,9 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 				self->_retryCount = 0;
 				self.statusError = nil;
 				self.buffering = NO;
+				if ([[MLEqualizerManager sharedManager] enabled]) {
+					[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:observed];
+				}
 				if (self.playing) {
 					[self->_player play];
 				}
@@ -492,6 +500,7 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 
 				if (self->_currentRawStreamURL &&
 				    ![self->_currentPlaybackURL isEqual:self->_currentRawStreamURL] &&
+				    !self->_currentRawStreamURL.isFileURL &&
 				    (errCode == -1022 || errCode == -1004 || errCode == -1001 || errCode == -1005)) {
 					NSLog(@"[MLPlaybackManager] Relay failed with error %ld, falling back directly to raw stream: %@",
 					      (long)errCode, self->_currentRawStreamURL);

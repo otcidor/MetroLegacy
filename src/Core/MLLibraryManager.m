@@ -49,6 +49,8 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 	BOOL _syncing;
 	NSMutableArray *_syncCallbacks;
 	NSDate *_lastSyncDate;
+	NSUInteger _totalLikedSongsCount;
+	NSString *_likedSongsContinuation;
 }
 
 + (instancetype)sharedManager
@@ -133,6 +135,8 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 		[self syncWithYouTubeMusicCompletion:nil];
 	} else {
 		[_lock lock];
+		_totalLikedSongsCount = 0;
+		_likedSongsContinuation = nil;
 		[_syncedLikedIds removeAllObjects];
 		[_syncedPlaylists removeAllObjects];
 		[_syncedSongs removeAllObjects];
@@ -205,6 +209,12 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 		}
 		if ([state[@"lastSyncDate"] isKindOfClass:[NSDate class]]) {
 			_lastSyncDate = state[@"lastSyncDate"];
+		}
+		if (state[@"totalLikedSongsCount"]) {
+			_totalLikedSongsCount = [state[@"totalLikedSongsCount"] unsignedIntegerValue];
+		}
+		if ([state[@"likedSongsContinuation"] isKindOfClass:[NSString class]]) {
+			_likedSongsContinuation = [state[@"likedSongsContinuation"] copy];
 		}
 	}
 
@@ -288,6 +298,10 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 	NSMutableDictionary *state = [NSMutableDictionary dictionary];
 	state[@"likedSongs"] = [self serializeItems:_likedSongs];
 	state[@"syncedLikedIds"] = [_syncedLikedIds allObjects] ?: @[];
+	state[@"totalLikedSongsCount"] = @(_totalLikedSongsCount);
+	if (_likedSongsContinuation.length) {
+		state[@"likedSongsContinuation"] = _likedSongsContinuation;
+	}
 	state[@"syncedPlaylists"] = [self serializeItems:_syncedPlaylists];
 	state[@"syncedSongs"] = [self serializeItems:_syncedSongs];
 	state[@"syncedAlbums"] = [self serializeItems:_syncedAlbums];
@@ -319,6 +333,25 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 	NSArray *copy = [_likedSongs copy];
 	[_lock unlock];
 	return copy;
+}
+
+- (NSUInteger)totalLikedSongsCount
+{
+	[_lock lock];
+	NSUInteger count = _totalLikedSongsCount;
+	if (count == 0 && _likedSongs.count > 0) {
+		count = _likedSongs.count;
+	}
+	[_lock unlock];
+	return count;
+}
+
+- (NSString *)likedSongsContinuation
+{
+	[_lock lock];
+	NSString *c = [_likedSongsContinuation copy];
+	[_lock unlock];
+	return c;
 }
 
 - (NSArray *)syncedPlaylists
@@ -487,12 +520,16 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 		}];
 		if (existing.count > 0) [_likedSongs removeObjectsAtIndexes:existing];
 		[_likedSongs insertObject:song atIndex:0];
+		if (_totalLikedSongsCount > 0) _totalLikedSongsCount++;
+		else _totalLikedSongsCount = _likedSongs.count;
 	} else {
 		[_likedIds removeObject:vid];
+		[_syncedLikedIds removeObject:vid];
 		NSIndexSet *existing = [_likedSongs indexesOfObjectsPassingTest:^BOOL(MLYTItem *obj, NSUInteger idx, BOOL *stop) {
 			return [obj.videoId isEqualToString:vid];
 		}];
 		if (existing.count > 0) [_likedSongs removeObjectsAtIndexes:existing];
+		if (_totalLikedSongsCount > 0) _totalLikedSongsCount--;
 	}
 	[self saveLibraryStateLocked];
 	[_lock unlock];
@@ -512,6 +549,156 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 		}];
 	} else {
 		if (completion) completion(newState, nil);
+	}
+}
+
+- (void)markSongId:(NSString *)videoId asLiked:(BOOL)liked
+{
+	[self markSongId:videoId item:nil asLiked:liked];
+}
+
+- (void)markSong:(MLYTItem *)song asLiked:(BOOL)liked
+{
+	if (!song || !song.videoId.length) return;
+	[self markSongId:song.videoId item:song asLiked:liked];
+}
+
+- (void)markSongId:(NSString *)videoId item:(MLYTItem *)song asLiked:(BOOL)liked
+{
+	if (!videoId.length) return;
+	[_lock lock];
+	BOOL currentlyLiked = [_likedIds containsObject:videoId];
+	if (currentlyLiked == liked) {
+		[_lock unlock];
+		return;
+	}
+	if (liked) {
+		[_likedIds addObject:videoId];
+		[_syncedLikedIds addObject:videoId];
+		if (song) {
+			NSIndexSet *existing = [_likedSongs indexesOfObjectsPassingTest:^BOOL(MLYTItem *obj, NSUInteger idx, BOOL *stop) {
+				return [obj.videoId isEqualToString:videoId];
+			}];
+			if (existing.count > 0) [_likedSongs removeObjectsAtIndexes:existing];
+			[_likedSongs insertObject:song atIndex:0];
+		}
+		if (_totalLikedSongsCount > 0 && _totalLikedSongsCount < _likedSongs.count) {
+			_totalLikedSongsCount = _likedSongs.count;
+		}
+	} else {
+		[_likedIds removeObject:videoId];
+		[_syncedLikedIds removeObject:videoId];
+		NSIndexSet *existing = [_likedSongs indexesOfObjectsPassingTest:^BOOL(MLYTItem *obj, NSUInteger idx, BOOL *stop) {
+			return [obj.videoId isEqualToString:videoId];
+		}];
+		if (existing.count > 0) [_likedSongs removeObjectsAtIndexes:existing];
+		if (_totalLikedSongsCount > 0) {
+			_totalLikedSongsCount--;
+		}
+	}
+	[self saveLibraryStateLocked];
+	[_lock unlock];
+	[self notifyUpdate];
+}
+
+- (void)setLikedSongsLocked:(NSArray *)songs header:(NSDictionary *)header nextContinuation:(NSString *)next
+{
+	if (!songs && !header) return;
+	NSUInteger parsedCount = [MLInnerTube trackCountFromHeader:header];
+	if (parsedCount > 0) {
+		_totalLikedSongsCount = parsedCount;
+	}
+	if (next.length > 0) {
+		_likedSongsContinuation = [next copy];
+	} else if (next == nil && songs.count > 0) {
+		_likedSongsContinuation = nil;
+	}
+
+	if (songs != nil) {
+		NSMutableSet *remoteIds = [NSMutableSet set];
+		for (MLYTItem *it in songs) {
+			if (it.videoId.length) [remoteIds addObject:it.videoId];
+		}
+
+		NSMutableArray *mergedLiked = [NSMutableArray array];
+		NSMutableSet *seen = [NSMutableSet set];
+
+		// 1. Preserve unsynced offline local likes
+		for (MLYTItem *localIt in _likedSongs) {
+			NSString *vid = localIt.videoId;
+			if (!vid.length || [seen containsObject:vid]) continue;
+			if (![remoteIds containsObject:vid] && ![_syncedLikedIds containsObject:vid]) {
+				[mergedLiked addObject:localIt];
+				[seen addObject:vid];
+			}
+		}
+
+		// 2. Add songs from newly fetched remote batch (in remote order)
+		for (MLYTItem *it in songs) {
+			if (!it.videoId.length || [seen containsObject:it.videoId]) continue;
+			[mergedLiked addObject:it];
+			[seen addObject:it.videoId];
+		}
+
+		// 3. Preserve older existing liked songs from previous pages/sessions
+		for (MLYTItem *existingIt in _likedSongs) {
+			NSString *vid = existingIt.videoId;
+			if (!vid.length || [seen containsObject:vid]) continue;
+			[mergedLiked addObject:existingIt];
+			[seen addObject:vid];
+		}
+
+		[_likedSongs setArray:mergedLiked];
+		[_likedIds unionSet:seen];
+		[_syncedLikedIds unionSet:seen];
+		if (_totalLikedSongsCount < _likedSongs.count) {
+			_totalLikedSongsCount = _likedSongs.count;
+		}
+	}
+}
+
+- (void)setLikedSongs:(NSArray *)songs header:(NSDictionary *)header nextContinuation:(NSString *)next
+{
+	[_lock lock];
+	[self setLikedSongsLocked:songs header:header nextContinuation:next];
+	[self saveLibraryStateLocked];
+	[_lock unlock];
+	[self notifyUpdate];
+}
+
+- (void)appendLikedSongs:(NSArray *)songs nextContinuation:(NSString *)next
+{
+	if (songs.count == 0 && next == nil) return;
+	[_lock lock];
+	if (next.length > 0) {
+		_likedSongsContinuation = [next copy];
+	} else {
+		_likedSongsContinuation = nil;
+	}
+
+	NSMutableSet *seen = [NSMutableSet setWithCapacity:_likedSongs.count + songs.count];
+	for (MLYTItem *it in _likedSongs) {
+		if (it.videoId.length) [seen addObject:it.videoId];
+	}
+
+	BOOL changed = NO;
+	for (MLYTItem *it in songs) {
+		if (it.videoId.length && ![seen containsObject:it.videoId]) {
+			[seen addObject:it.videoId];
+			[_likedSongs addObject:it];
+			[_likedIds addObject:it.videoId];
+			[_syncedLikedIds addObject:it.videoId];
+			changed = YES;
+		}
+	}
+	if (_totalLikedSongsCount < _likedSongs.count) {
+		_totalLikedSongsCount = _likedSongs.count;
+	}
+
+	[self saveLibraryStateLocked];
+	[_lock unlock];
+	if (changed) {
+		[self notifyUpdate];
 	}
 }
 
@@ -607,6 +794,8 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 	[self notifyUpdate];
 
 	__block NSArray *remoteLiked = nil;
+	__block NSDictionary *remoteLikedHeader = nil;
+	__block NSString *remoteLikedNext = nil;
 	__block NSArray *remotePlaylists = nil;
 	__block NSArray *remoteSongs = nil;
 	__block NSArray *remoteAlbums = nil;
@@ -619,36 +808,22 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 
 		[self->_lock lock];
 
-		if (remoteLiked != nil) {
+		if (remoteLiked != nil || remoteLikedHeader != nil) {
 			NSMutableSet *remoteIds = [NSMutableSet set];
 			for (MLYTItem *it in remoteLiked) {
 				if (it.videoId.length) [remoteIds addObject:it.videoId];
 			}
 
-			NSMutableArray *mergedLiked = [NSMutableArray array];
-			NSMutableSet *seen = [NSMutableSet set];
-
 			// Preserve offline local likes that were never synced to YouTube Music yet, and push them
 			for (MLYTItem *localIt in self->_likedSongs) {
 				NSString *vid = localIt.videoId;
-				if (!vid.length || [seen containsObject:vid]) continue;
+				if (!vid.length) continue;
 				if (![remoteIds containsObject:vid] && ![self->_syncedLikedIds containsObject:vid]) {
-					[mergedLiked addObject:localIt];
-					[seen addObject:vid];
 					[unsyncedLocalLikesToPush addObject:vid];
 				}
 			}
 
-			// Add all currently liked songs from YouTube Music (in remote order)
-			for (MLYTItem *it in remoteLiked) {
-				if (!it.videoId.length || [seen containsObject:it.videoId]) continue;
-				[mergedLiked addObject:it];
-				[seen addObject:it.videoId];
-			}
-
-			[self->_likedSongs setArray:mergedLiked];
-			[self->_likedIds setSet:seen];
-			[self->_syncedLikedIds setSet:seen];
+			[self setLikedSongsLocked:remoteLiked header:remoteLikedHeader nextContinuation:remoteLikedNext];
 		}
 
 		if (remotePlaylists != nil) {
@@ -774,6 +949,8 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 	// 1. Liked songs (VLLM) -> 2. Playlists -> 3. Library Songs -> 4. Albums -> 5. Artists -> 6. History
 	[[MLInnerTube sharedClient] likedSongsWithCompletion:^(NSDictionary *header, NSArray *tracks, NSString *next, NSString *err) {
 		if (tracks) remoteLiked = tracks;
+		if (header) remoteLikedHeader = header;
+		if (next) remoteLikedNext = next;
 		else if (err && !firstError) firstError = err;
 
 		[[MLInnerTube sharedClient] libraryWithBrowseId:@"FEmusic_liked_playlists" completion:^(NSArray *plItems, NSString *plErr) {
@@ -965,7 +1142,17 @@ static const unsigned long long kDownloadChunkSize = 262144ULL; // 256 KB
 			break;
 		}
 	}
-	if (!sidxPtr || (size_t)(sidxPtr - bytes + 24) > len) {
+	if (!sidxPtr) {
+		BOOL hasMoov = NO;
+		for (size_t i = 4; i + 8 <= len; i++) {
+			if (bytes[i] == 'm' && bytes[i+1] == 'o' && bytes[i+2] == 'o' && bytes[i+3] == 'v') {
+				hasMoov = YES;
+				break;
+			}
+		}
+		return hasMoov && (fileSize > 32768);
+	}
+	if ((size_t)(sidxPtr - bytes + 24) > len) {
 		return NO;
 	}
 

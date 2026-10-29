@@ -333,20 +333,23 @@
 	[MLTheme triggerImpactHaptic];
 
 	NSString *fp = _filterParams;
+	__weak typeof(self) wself = self;
 	[[MLInnerTube sharedClient] searchQuery:q params:fp continuation:nil completion:^(NSArray *items, NSString *next, NSString *err) {
-		_loading = NO;
-		_showingSuggestions = NO;
-		[_suggestions removeAllObjects];
-		[_results removeAllObjects];
+		MLSearchViewController *s = wself;
+		if (!s) return;
+		s->_loading = NO;
+		s->_showingSuggestions = NO;
+		[s->_suggestions removeAllObjects];
+		[s->_results removeAllObjects];
 		if (err) {
-			[MLTheme setLeftNavigationTitle:err forViewController:self];
+			[MLTheme setLeftNavigationTitle:err forViewController:s];
 			return;
 		}
-		[MLTheme setLeftNavigationTitle:MLLocalizedString(@"search_title", nil) forViewController:self];
-		[_results addObjectsFromArray:items ?: @[]];
-		_nextContinuation = next;
-		[self updateLayoutForResultsState];
-		[_table reloadData];
+		[MLTheme setLeftNavigationTitle:MLLocalizedString(@"search_title", nil) forViewController:s];
+		[s->_results addObjectsFromArray:items ?: @[]];
+		s->_nextContinuation = next;
+		[s updateLayoutForResultsState];
+		[s->_table reloadData];
 	}];
 }
 

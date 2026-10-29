@@ -491,8 +491,19 @@ typedef enum {
 	if (sub.length)
 		_subtitleLabel.text = sub;
 	else {
-		NSString *fmt = (_tracks.count == 1) ? MLLocalizedString(@"songs_count_single", nil) : MLLocalizedString(@"songs_count_plural", nil);
-		_subtitleLabel.text = [NSString stringWithFormat:fmt, (unsigned long)_tracks.count];
+		NSUInteger displayCount = _tracks.count;
+		if (_mode == MLDetailModeLiked && [MLLibraryManager sharedManager].totalLikedSongsCount > 0) {
+			displayCount = [MLLibraryManager sharedManager].totalLikedSongsCount;
+		}
+		NSString *fmt = (displayCount == 1) ? MLLocalizedString(@"songs_count_single", nil) : MLLocalizedString(@"songs_count_plural", nil);
+		static NSNumberFormatter *numFormatter = nil;
+		static dispatch_once_t onceToken;
+		dispatch_once(&onceToken, ^{
+			numFormatter = [[NSNumberFormatter alloc] init];
+			numFormatter.numberStyle = NSNumberFormatterDecimalStyle;
+		});
+		NSString *numStr = [numFormatter stringFromNumber:@(displayCount)] ?: [NSString stringWithFormat:@"%lu", (unsigned long)displayCount];
+		_subtitleLabel.text = [fmt stringByReplacingOccurrencesOfString:@"%lu" withString:numStr];
 	}
 	if (thumb.length)
 		[self loadHeaderThumb:thumb];
@@ -540,15 +551,24 @@ typedef enum {
 			[self applyHeaderInfo:@{}];
 			[_table reloadData];
 		}
+		_nextContinuation = [MLLibraryManager sharedManager].likedSongsContinuation;
 		if ([[MLInnerTube sharedClient] loggedIn]) {
 			_loading = YES;
 			if (_tracks.count == 0) [_spinner startAnimating];
-			[[MLLibraryManager sharedManager] syncWithYouTubeMusicCompletion:^(BOOL ok, NSString *err) {
-				_loading = NO;
-				[_spinner stopAnimating];
-				[_tracks setArray:[MLLibraryManager sharedManager].likedSongs];
-				[self applyHeaderInfo:@{}];
-				[_table reloadData];
+			__weak MLListDetailViewController *wself = self;
+			[[MLInnerTube sharedClient] likedSongsWithContinuation:nil completion:^(NSDictionary *hdr, NSArray *tracks, NSString *next, NSString *err) {
+				MLListDetailViewController *s = wself;
+				if (!s) return;
+				s->_loading = NO;
+				[s->_spinner stopAnimating];
+				if (tracks.count > 0 || hdr.count > 0) {
+					[s applyHeaderInfo:hdr ?: @{}];
+					[[MLLibraryManager sharedManager] setLikedSongs:tracks header:hdr nextContinuation:next];
+					[s->_tracks setArray:[MLLibraryManager sharedManager].likedSongs];
+					s->_nextContinuation = next ?: [MLLibraryManager sharedManager].likedSongsContinuation;
+					[s->_table reloadData];
+				}
+				[s updateDownloadButtonState];
 			}];
 		} else {
 			[self applyHeaderInfo:@{}];
@@ -573,31 +593,34 @@ typedef enum {
 	if (_tracks.count == 0)
 		[_spinner startAnimating];
 
+	__weak typeof(self) wself = self;
 	void (^done)(NSDictionary *header, NSArray *tracks, NSString *next, NSString *err) =
 	    ^(NSDictionary *header, NSArray *tracks, NSString *next, NSString *err) {
-		_loading = NO;
-		[_spinner stopAnimating];
+		MLListDetailViewController *s = wself;
+		if (!s) return;
+		s->_loading = NO;
+		[s->_spinner stopAnimating];
 		if (err) {
-			if (_tracks.count == 0)
-				self.title = err;
+			if (s->_tracks.count == 0)
+				s.title = err;
 			return;
 		}
 		if (tracks.count > 0) {
-			[_tracks setArray:tracks];
-			NSString *ck = [self currentCacheKey];
+			[s->_tracks setArray:tracks];
+			NSString *ck = [s currentCacheKey];
 			if (ck.length) {
 				NSMutableDictionary *hdr = [NSMutableDictionary dictionaryWithDictionary:header ?: @{}];
-				if (![hdr[@"title"] length] && _initialTitle.length)
-					hdr[@"title"] = _initialTitle;
-				if (![hdr[@"thumbnailUrl"] length] && _initialThumb.length)
-					hdr[@"thumbnailUrl"] = _initialThumb;
-				[[MLLibraryManager sharedManager] cachePlaylistHeader:hdr tracks:_tracks forKey:ck];
+				if (![hdr[@"title"] length] && s->_initialTitle.length)
+					hdr[@"title"] = s->_initialTitle;
+				if (![hdr[@"thumbnailUrl"] length] && s->_initialThumb.length)
+					hdr[@"thumbnailUrl"] = s->_initialThumb;
+				[[MLLibraryManager sharedManager] cachePlaylistHeader:hdr tracks:s->_tracks forKey:ck];
 			}
 		}
-		_nextContinuation = next;
-		[self applyHeaderInfo:header ?: @{}];
-		[_table reloadData];
-		[self updateDownloadButtonState];
+		s->_nextContinuation = next;
+		[s applyHeaderInfo:header ?: @{}];
+		[s->_table reloadData];
+		[s updateDownloadButtonState];
 	};
 
 	if (_mode == MLDetailModeAlbum && _browseId) {
@@ -656,6 +679,25 @@ typedef enum {
 	if (!cont || _loading)
 		return;
 	_loading = YES;
+	if (_mode == MLDetailModeLiked) {
+		__weak MLListDetailViewController *wself = self;
+		[[MLInnerTube sharedClient] likedSongsWithContinuation:cont completion:^(NSDictionary *header, NSArray *tracks, NSString *next, NSString *err) {
+			MLListDetailViewController *s = wself;
+			if (!s) return;
+			s->_loading = NO;
+			if (tracks.count > 0) {
+				[s->_tracks addObjectsFromArray:tracks];
+				[[MLLibraryManager sharedManager] appendLikedSongs:tracks nextContinuation:next];
+				s->_nextContinuation = next;
+				[s->_table reloadData];
+			} else {
+				s->_nextContinuation = nil;
+				[s->_table reloadData];
+			}
+			[s updateDownloadButtonState];
+		}];
+		return;
+	}
 	NSString *pid = _playlistId;
 	[[MLInnerTube sharedClient] playlistWithId:pid continuation:cont
 	                                completion:^(NSDictionary *header, NSArray *tracks, NSString *next, NSString *err) {
@@ -727,6 +769,13 @@ typedef enum {
 		[MLNavigator presentSongMenuForItem:tapped fromViewController:wself];
 	};
 	return cell;
+}
+
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
+{
+	if (indexPath.row == _tracks.count && _nextContinuation.length > 0 && !_loading) {
+		[self loadMore];
+	}
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath

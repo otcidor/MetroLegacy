@@ -23,6 +23,7 @@ typedef NS_ENUM(NSInteger, MLRepeatMode) {
 @property (nonatomic, readonly) MLYTItem *currentItem;
 @property (nonatomic, readonly) BOOL playing;
 @property (nonatomic, readonly) BOOL buffering;
+@property (nonatomic, readonly) AVPlayer *player;
 @property (nonatomic, readonly) CGFloat currentTime;   // seconds
 @property (nonatomic, readonly) CGFloat duration;      // seconds, 0 unknown
 @property (nonatomic, readonly) NSString *statusError;

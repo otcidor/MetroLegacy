@@ -109,8 +109,11 @@
 - (void)layoutSubviews
 {
 	[super layoutSubviews];
+	CGFloat w = self.bounds.size.width;
 	CGFloat h = self.bounds.size.height;
-	if (h > 0) {
+	if (w > 0 && h > 0) {
+		_statusLabel.frame = CGRectMake(24.0f, 0, w - 48.0f, h);
+		_spinner.center = CGPointMake(w / 2.0f, h / 2.0f);
 		UIEdgeInsets insets = UIEdgeInsetsMake(floorf(h * 0.35f), 0, ceilf(h * 0.55f), 0);
 		if (!UIEdgeInsetsEqualToEdgeInsets(_tableView.contentInset, insets)) {
 			_tableView.contentInset = insets;

@@ -48,7 +48,9 @@
 "language" = "Idioma";
 "language_sub" = "Español";
 "select_language" = "Seleccionar idioma";
+"language_select_title" = "Seleccionar idioma";
 "lang_auto" = "Automático (Sistema)";
+"lang_system" = "Predeterminado del sistema";
 "lang_es" = "Español";
 "lang_en" = "English";
 "lang_ru" = "Русский";
@@ -79,6 +81,9 @@
 /* Login */
 "login_title" = "Iniciar sesión";
 "login_loading" = "Cargando music.youtube.com…";
+"login_ready" = "Página cargada";
+"login_error" = "Error al cargar la página";
+"login_incomplete" = "Inicia sesión con tu cuenta primero";
 "done" = "Listo";
 "login_detected" = "Sesión detectada. Pulsa Listo.";
 "login_prompt" = "Inicia sesión en la página. (Requiere Web Port activado)";
@@ -241,4 +246,33 @@
 "about_title" = "MetroLegacy";
 "about_sub" = "Inspirado en MetroList por vfsfitvnm";
 "about_details" = "v1.0.0 • Cliente YouTube Music para iOS 6+";
+
+/* Equalizer */
+"equalizer_title" = "Ecualizador";
+"equalizer_enable" = "Activar ecualizador";
+"equalizer_reset" = "Restablecer";
+"equalizer_hint" = "Ajusta las 10 bandas de audio en tiempo real.";
+"eq_preset_flat" = "Plano";
+"eq_preset_acoustic" = "Acústico";
+"eq_preset_bass_booster" = "Refuerzo de graves";
+"eq_preset_bass_reducer" = "Reductor de graves";
+"eq_preset_classical" = "Clásica";
+"eq_preset_dance" = "Dance";
+"eq_preset_deep" = "Profundo";
+"eq_preset_electronic" = "Electrónica";
+"eq_preset_hip_hop" = "Hip-Hop";
+"eq_preset_jazz" = "Jazz";
+"eq_preset_latin" = "Latino";
+"eq_preset_loudness" = "Sonoridad";
+"eq_preset_lounge" = "Lounge";
+"eq_preset_piano" = "Piano";
+"eq_preset_pop" = "Pop";
+"eq_preset_r_b" = "R&B";
+"eq_preset_rock" = "Rock";
+"eq_preset_small_speakers" = "Altavoces pequeños";
+"eq_preset_spoken_word" = "Voz hablada";
+"eq_preset_treble_booster" = "Refuerzo de agudos";
+"eq_preset_treble_reducer" = "Reductor de agudos";
+"eq_preset_vocal_booster" = "Realce vocal";
+"eq_preset_custom" = "Personalizado";
 

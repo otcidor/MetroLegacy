@@ -156,30 +156,39 @@
 			getParams = [getParams stringByAppendingFormat:@"&duration=%d", (int)round(duration)];
 		}
 		NSString *getUrl = [NSString stringWithFormat:@"https://lrclib.net/api/get?%@", getParams];
-		NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:getUrl]
-		                                                   cachePolicy:NSURLRequestUseProtocolCachePolicy
-		                                               timeoutInterval:6.0];
-		[req setValue:@"MetroLegacy/1.1 (iOS)" forHTTPHeaderField:@"User-Agent"];
+		NSURL *getURLObj = [NSURL URLWithString:getUrl];
+		id json = nil;
+		if (getURLObj) {
+			NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:getURLObj
+			                                                   cachePolicy:NSURLRequestUseProtocolCachePolicy
+			                                               timeoutInterval:6.0];
+			[req setValue:@"MetroLegacy/1.1 (iOS)" forHTTPHeaderField:@"User-Agent"];
 
-		NSHTTPURLResponse *resp = nil;
-		NSError *err = nil;
-		NSData *data = [MLTLSTrustManager sendSynchronousRequest:req returningResponse:&resp error:&err];
+			NSHTTPURLResponse *resp = nil;
+			NSError *err = nil;
+			NSData *data = [MLTLSTrustManager sendSynchronousRequest:req returningResponse:&resp error:&err];
 
-		id json = (!err && resp.statusCode == 200 && data.length > 0) ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+			json = (!err && resp.statusCode == 200 && data.length > 0) ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+		}
 
 		// 2. If exact get failed, try search
 		if (![json isKindOfClass:[NSDictionary class]]) {
 			NSString *query = [NSString stringWithFormat:@"%@ %@", cleanedTitle, cleanedArtist];
 			NSString *searchUrl = [NSString stringWithFormat:@"https://lrclib.net/api/search?q=%@", [self urlEncode:query]];
-			NSMutableURLRequest *sReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:searchUrl]
-			                                                    cachePolicy:NSURLRequestUseProtocolCachePolicy
-			                                                timeoutInterval:6.0];
-			[sReq setValue:@"MetroLegacy/1.1 (iOS)" forHTTPHeaderField:@"User-Agent"];
-			NSData *sData = [MLTLSTrustManager sendSynchronousRequest:sReq returningResponse:&resp error:&err];
-			if (!err && resp.statusCode == 200 && sData.length > 0) {
-				id sJson = [NSJSONSerialization JSONObjectWithData:sData options:0 error:nil];
-				if ([sJson isKindOfClass:[NSArray class]] && [(NSArray *)sJson count] > 0) {
-					json = [(NSArray *)sJson firstObject];
+			NSURL *searchURLObj = [NSURL URLWithString:searchUrl];
+			if (searchURLObj) {
+				NSMutableURLRequest *sReq = [NSMutableURLRequest requestWithURL:searchURLObj
+				                                                    cachePolicy:NSURLRequestUseProtocolCachePolicy
+				                                                timeoutInterval:6.0];
+				[sReq setValue:@"MetroLegacy/1.1 (iOS)" forHTTPHeaderField:@"User-Agent"];
+				NSHTTPURLResponse *resp = nil;
+				NSError *err = nil;
+				NSData *sData = [MLTLSTrustManager sendSynchronousRequest:sReq returningResponse:&resp error:&err];
+				if (!err && resp.statusCode == 200 && sData.length > 0) {
+					id sJson = [NSJSONSerialization JSONObjectWithData:sData options:0 error:nil];
+					if ([sJson isKindOfClass:[NSArray class]] && [(NSArray *)sJson count] > 0) {
+						json = [(NSArray *)sJson firstObject];
+					}
 				}
 			}
 		}

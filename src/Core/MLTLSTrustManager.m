@@ -38,8 +38,22 @@
 
 - (void)start
 {
+	if (!self.request || !self.request.URL) {
+		self.error = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorBadURL userInfo:nil];
+		if (self.sem) {
+			dispatch_semaphore_signal(self.sem);
+		}
+		return;
+	}
 	self.data = [NSMutableData data];
 	self.connection = [[NSURLConnection alloc] initWithRequest:self.request delegate:self startImmediately:NO];
+	if (!self.connection) {
+		self.error = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorBadURL userInfo:nil];
+		if (self.sem) {
+			dispatch_semaphore_signal(self.sem);
+		}
+		return;
+	}
 	[self.connection scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSRunLoopCommonModes];
 	[self.connection start];
 }
@@ -203,7 +217,7 @@
                  returningResponse:(NSHTTPURLResponse **)responseOut
                              error:(NSError **)errorOut
 {
-	if (!request) {
+	if (!request || !request.URL) {
 		if (errorOut) {
 			*errorOut = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorBadURL userInfo:nil];
 		}

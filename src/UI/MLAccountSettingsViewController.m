@@ -11,6 +11,8 @@
 #import "MLListDetailViewController.h"
 #import "MLRootViewController.h"
 #import "MLBottomSheet.h"
+#import "MLEqualizerViewController.h"
+#import "MLEqualizerManager.h"
 #import <QuartzCore/QuartzCore.h>
 
 #pragma mark - Navbar Circular Profile Avatar Button
@@ -577,9 +579,16 @@
 	[nc addObserver:self selector:@selector(rebuildRows) name:MLLibraryDidUpdateNotification object:nil];
 	[nc addObserver:self selector:@selector(rebuildRows) name:MLLanguageChangedNotification object:nil];
 	[nc addObserver:self selector:@selector(themeChanged:) name:MLThemeDidChangeNotification object:nil];
+	[nc addObserver:self selector:@selector(rebuildRows) name:MLEqualizerDidChangeNotification object:nil];
 
 	[self rebuildRows];
 	[self refreshAccountIfNeeded];
+}
+
+- (void)viewWillAppear:(BOOL)animated
+{
+	[super viewWillAppear:animated];
+	[self rebuildRows];
 }
 
 - (void)viewDidLayoutSubviews
@@ -738,6 +747,16 @@
 		@"color" : [UIColor colorWithRed:0.95f green:0.35f blue:0.35f alpha:1.0f],
 		@"isSwitch" : @YES,
 		@"switchValue" : @(sbEnabled),
+	}];
+	BOOL eqEnabled = [MLEqualizerManager sharedManager].enabled;
+	NSString *eqPresetName = [[MLEqualizerManager sharedManager] currentPresetLocalizedName];
+	NSString *eqSub = eqEnabled ? eqPresetName : MLLocalizedString(@"disabled", nil);
+	[list addObject:@{
+		@"type" : @"equalizer",
+		@"title" : MLLocalizedString(@"equalizer_title", nil),
+		@"subtitle" : eqSub,
+		@"icon" : @"equalizer",
+		@"color" : [UIColor colorWithRed:0.95f green:0.60f blue:0.15f alpha:1.0f],
 	}];
 
 	// Group 3: Theme & Appearance
@@ -986,6 +1005,15 @@
 	if ([type isEqualToString:@"sponsorblock"]) {
 		[MLSponsorBlockManager sharedManager].enabled = ![MLSponsorBlockManager sharedManager].enabled;
 		[self rebuildRows];
+		return;
+	}
+	if ([type isEqualToString:@"equalizer"]) {
+		MLEqualizerViewController *eqVC = [[MLEqualizerViewController alloc] init];
+		if (self.navigationController) {
+			[self.navigationController pushViewController:eqVC animated:YES];
+		} else {
+			[self presentViewController:eqVC animated:YES completion:nil];
+		}
 		return;
 	}
 	if ([type isEqualToString:@"theme_dynamic"]) {

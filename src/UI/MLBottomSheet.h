@@ -39,5 +39,6 @@
 - (void)showInViewController:(UIViewController *)vc;
 - (void)showInView:(UIView *)parentView;
 - (void)dismissAnimated:(BOOL)animated;
+- (void)dismissAnimated:(BOOL)animated completion:(void (^)(void))completion;
 
 @end

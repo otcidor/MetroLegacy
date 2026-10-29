@@ -1,4 +1,5 @@
 #import "MLInnerTube.h"
+#import "../Core/MLLibraryManager.h"
 
 /*
  * Renderer parsing: JSON → MLYTItem / MLHomeSection / MLChip.
@@ -417,6 +418,21 @@ static MLYTKind MLKindFromPageType(NSString *pageType)
 		return nil;
 	if (!item.videoId.length && !item.browseId.length && !item.playlistId.length)
 		return nil;
+
+	// Real-time like status detection from YouTube Music response
+	if (item.videoId.length > 0) {
+		for (NSDictionary *lb in [self allObjectsForKey:@"likeButtonRenderer" inObject:r maxDepth:8]) {
+			NSString *status = lb[@"likeStatus"];
+			if ([status isKindOfClass:[NSString class]] && [status isEqualToString:@"LIKE"]) {
+				NSString *targetVid = MLPath(lb, @"target.videoId") ?: item.videoId;
+				if (targetVid.length > 0) {
+					[[MLLibraryManager sharedManager] markSongId:targetVid asLiked:YES];
+				}
+				break;
+			}
+		}
+	}
+
 	return item;
 }
 
@@ -547,7 +563,23 @@ static MLYTKind MLKindFromPageType(NSString *pageType)
 			item.artists = artists;
 		item.duration = MLDurationFromString([self textFromRuns:MLPath(r, @"lengthText")]);
 		item.thumbnailUrl = [self bestThumbnailUrl:MLPath(r, @"thumbnail")];
-		return item.title ? item : nil;
+		if (!item.title)
+			return nil;
+
+		if (item.videoId.length > 0) {
+			for (NSDictionary *lb in [self allObjectsForKey:@"likeButtonRenderer" inObject:r maxDepth:8]) {
+				NSString *status = lb[@"likeStatus"];
+				if ([status isKindOfClass:[NSString class]] && [status isEqualToString:@"LIKE"]) {
+					NSString *targetVid = MLPath(lb, @"target.videoId") ?: item.videoId;
+					if (targetVid.length > 0) {
+						[[MLLibraryManager sharedManager] markSongId:targetVid asLiked:YES];
+					}
+					break;
+				}
+			}
+		}
+
+		return item;
 	}
 	if ((r = wrapper[@"musicMultiRowListItemRenderer"])) {
 		MLYTItem *item = [[MLYTItem alloc] init];
@@ -757,6 +789,52 @@ static MLYTKind MLKindFromPageType(NSString *pageType)
 	return nil;
 }
 
++ (NSUInteger)trackCountFromText:(NSString *)text
+{
+	if (!text.length) return 0;
+	static NSRegularExpression *regexWithWord = nil;
+	static NSRegularExpression *regexDigitsOnly = nil;
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		NSError *err = nil;
+		regexWithWord = [NSRegularExpression regularExpressionWithPattern:@"([0-9][0-9\\.,\\s\u00a0\u202f]*)\\s*(?:cancion(?:es)?|canci[oó]n|songs?|titres?|temas?|pistas?|videos?|t[ií]tulos?)"
+		                                                          options:NSRegularExpressionCaseInsensitive
+		                                                            error:&err];
+		regexDigitsOnly = [NSRegularExpression regularExpressionWithPattern:@"^[\\s\u00a0]*([0-9][0-9\\.,\\s\u00a0\u202f]*)[\\s\u00a0]*$"
+		                                                            options:0
+		                                                              error:&err];
+	});
+	NSTextCheckingResult *match = [regexWithWord firstMatchInString:text options:0 range:NSMakeRange(0, text.length)];
+	if (!match) {
+		match = [regexDigitsOnly firstMatchInString:text options:0 range:NSMakeRange(0, text.length)];
+	}
+	if (match && match.numberOfRanges > 1) {
+		NSString *numStr = [text substringWithRange:[match rangeAtIndex:1]];
+		NSMutableString *digitsOnly = [NSMutableString string];
+		for (NSUInteger i = 0; i < numStr.length; i++) {
+			unichar c = [numStr characterAtIndex:i];
+			if (c >= '0' && c <= '9') {
+				[digitsOnly appendFormat:@"%C", c];
+			}
+		}
+		if (digitsOnly.length > 0) {
+			return (NSUInteger)[digitsOnly longLongValue];
+		}
+	}
+	return 0;
+}
+
++ (NSUInteger)trackCountFromHeader:(NSDictionary *)header
+{
+	if (!header) return 0;
+	if (header[@"trackCount"]) {
+		return [header[@"trackCount"] unsignedIntegerValue];
+	}
+	NSUInteger tc = [self trackCountFromText:header[@"secondSubtitle"]];
+	if (tc == 0) tc = [self trackCountFromText:header[@"subtitle"]];
+	return tc;
+}
+
 + (NSDictionary *)headerInfoFromResponse:(NSDictionary *)response
 {
 	NSDictionary *header = [response objectForKey:@"header"];
@@ -791,8 +869,10 @@ static MLYTKind MLKindFromPageType(NSString *pageType)
 
 	NSString *title = nil;
 	NSString *subtitle = nil;
+	NSString *secondSubtitle = nil;
 	NSString *thumb = nil;
 	NSString *description = nil;
+	NSUInteger trackCount = 0;
 
 	NSArray *names = @[
 		@"musicDetailHeaderRenderer",
@@ -816,6 +896,10 @@ static MLYTKind MLKindFromPageType(NSString *pageType)
 		if (!subtitle)
 			subtitle = [self textFromRuns:MLPath(r, @"playlistHeaderRenderer.secondSubtitle")];
 
+		secondSubtitle = [self textFromRuns:MLPath(r, @"secondSubtitle")];
+		if (!secondSubtitle)
+			secondSubtitle = [self textFromRuns:MLPath(r, @"playlistHeaderRenderer.secondSubtitle")];
+
 		thumb = [self bestThumbnailUrl:MLPath(r, @"thumbnail")];
 		if (!thumb)
 			thumb = [self bestThumbnailUrl:MLPath(r, @"playlistHeaderRenderer.thumbnail")];
@@ -823,12 +907,26 @@ static MLYTKind MLKindFromPageType(NSString *pageType)
 		description = [self textFromRuns:MLPath(r, @"description")];
 		if (!description)
 			description = [self textFromRuns:MLPath(r, @"description.musicDescriptionShelfRenderer.description")];
+
+		trackCount = [self trackCountFromText:secondSubtitle];
+		if (trackCount == 0) trackCount = [self trackCountFromText:subtitle];
+		if (trackCount == 0 && r[@"itemCount"]) trackCount = [r[@"itemCount"] unsignedIntegerValue];
+		if (trackCount == 0) {
+			NSString *nvText = [self textFromRuns:MLPath(r, @"numVideosText")] ?: [self textFromRuns:MLPath(r, @"playlistHeaderRenderer.numVideosText")];
+			if (nvText.length > 0) {
+				trackCount = [self trackCountFromText:nvText];
+			}
+		}
 		break;
 	}
 	if (title)
 		info[@"title"] = title;
 	if (subtitle)
 		info[@"subtitle"] = subtitle;
+	if (secondSubtitle)
+		info[@"secondSubtitle"] = secondSubtitle;
+	if (trackCount > 0)
+		info[@"trackCount"] = @(trackCount);
 	if (thumb)
 		info[@"thumbnailUrl"] = thumb;
 	if (description)
