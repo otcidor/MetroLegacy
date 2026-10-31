@@ -21,6 +21,7 @@
 
 @property (nonatomic, strong) UIButton *resetButton;
 @property (nonatomic, strong) UILabel *hintLabel;
+@property (nonatomic, assign) BOOL previousNavBarHidden;
 
 @end
 
@@ -63,11 +64,20 @@
 {
 	[super viewWillAppear:animated];
 	if (self.navigationController) {
-		self.navigationController.navigationBarHidden = YES;
+		_previousNavBarHidden = self.navigationController.navigationBarHidden;
+		[self.navigationController setNavigationBarHidden:YES animated:animated];
 	}
 	[self reloadSliders];
 	[self reloadPresetChips];
 	[self updateUIForEnabledStateAnimated:NO];
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+	[super viewWillDisappear:animated];
+	if (self.navigationController) {
+		[self.navigationController setNavigationBarHidden:_previousNavBarHidden animated:animated];
+	}
 }
 
 // MARK: - View Construction
@@ -166,6 +176,7 @@
 		[slider setThumbImage:[MLTheme circleThumbWithColor:[MLTheme primary] diameter:18.0f] forState:UIControlStateHighlighted];
 		slider.transform = CGAffineTransformMakeRotation((CGFloat)(-M_PI_2));
 		[slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
+		[slider addTarget:self action:@selector(sliderTouchEnded:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
 		[_slidersCard addSubview:slider];
 		[_bandSliders addObject:slider];
 
@@ -318,7 +329,7 @@
 	}
 }
 
-- (void)reloadSliders
+- (void)reloadSlidersAnimated:(BOOL)animated
 {
 	MLEqualizerManager *mgr = [MLEqualizerManager sharedManager];
 	NSInteger numBands = [mgr numberOfBands];
@@ -326,7 +337,7 @@
 		float gain = [mgr gainForBand:i];
 		if (i < (NSInteger)_bandSliders.count) {
 			UISlider *sl = _bandSliders[i];
-			sl.value = gain;
+			[sl setValue:gain animated:animated];
 		}
 		if (i < (NSInteger)_bandValueLabels.count) {
 			UILabel *lbl = _bandValueLabels[i];
@@ -338,6 +349,11 @@
 			}
 		}
 	}
+}
+
+- (void)reloadSliders
+{
+	[self reloadSlidersAnimated:NO];
 }
 
 - (void)reloadPresetChips
@@ -400,9 +416,7 @@
 	if (sender.tag < presets.count) {
 		MLEQPreset *p = presets[sender.tag];
 		[[MLEqualizerManager sharedManager] applyPresetWithId:p.presetId];
-		[UIView animateWithDuration:0.2f animations:^{
-			[self reloadSliders];
-		}];
+		[self reloadSlidersAnimated:YES];
 		[self reloadPresetChips];
 		[_presetsScrollView scrollRectToVisible:CGRectInset(sender.frame, -20.0f, 0.0f) animated:YES];
 	}
@@ -429,17 +443,21 @@
 		lbl.textColor = (fabsf(stepped) > 0.05f) ? [MLTheme primary] : [MLTheme onSurfaceVariant];
 	}
 
-	[[MLEqualizerManager sharedManager] setGain:stepped forBand:band];
+	[[MLEqualizerManager sharedManager] setGain:stepped forBand:band notify:NO];
 	[self reloadPresetChips];
+}
+
+- (void)sliderTouchEnded:(UISlider *)sender
+{
+	[[MLEqualizerManager sharedManager] synchronizeSettings];
+	[[NSNotificationCenter defaultCenter] postNotificationName:MLEqualizerDidChangeNotification object:self];
 }
 
 - (void)resetTapped:(UIButton *)sender
 {
 	[MLTheme triggerImpactHaptic];
 	[[MLEqualizerManager sharedManager] resetToFlat];
-	[UIView animateWithDuration:0.25f animations:^{
-		[self reloadSliders];
-	}];
+	[self reloadSlidersAnimated:YES];
 	[self reloadPresetChips];
 }
 

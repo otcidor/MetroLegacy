@@ -29,6 +29,7 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 	NSURL *_currentPlaybackURL;
 	NSURL *_currentRawStreamURL;
 	CGFloat _lastKnownTime;
+	CGFloat _timeOffset;
 	NSInteger _retryCount;
 	NSTimer *_sleepCountdownTimer;
 	NSDate *_sleepTimerTargetDate;
@@ -122,11 +123,16 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 	if (!_player)
 		return _lastKnownTime;
 	CMTime t = [_player currentTime];
-	return CMTIME_IS_NUMERIC(t) ? (CGFloat)CMTimeGetSeconds(t) : _lastKnownTime;
+	CGFloat cur = CMTIME_IS_NUMERIC(t) ? (CGFloat)CMTimeGetSeconds(t) : 0;
+	return cur + _timeOffset;
 }
 
 - (CGFloat)duration
 {
+	NSTimeInterval relayDur = [[MLStreamRelay sharedRelay] durationForStreamURL:_currentPlaybackURL];
+	if (relayDur > 1.0) {
+		return (CGFloat)relayDur;
+	}
 	if (self.currentItem && self.currentItem.duration > 0) {
 		return (CGFloat)self.currentItem.duration;
 	}
@@ -211,6 +217,7 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 {
 	_retryCount = 0;
 	_lastKnownTime = 0;
+	_timeOffset = 0;
 	[self playIndex:index fresh:fresh resumeTime:0];
 }
 
@@ -254,7 +261,7 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 		[self loadRadioRecommendationsForCurrentItem];
 	}
 
-	// Fast offline/cache path: play directly from downloaded or cached local file via MLStreamRelay
+	// Fast offline/cache path: play directly from downloaded or cached local file
 	NSURL *localFileURL = [[MLLibraryManager sharedManager] localFileURLForVideoId:videoId];
 	if (localFileURL) {
 		__weak MLPlaybackManager *wself = self;
@@ -263,12 +270,29 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 			if (!s || s.currentIndex != index)
 				return;
 			s->_currentRawStreamURL = localFileURL;
-			[[MLStreamRelay sharedRelay] reviveListenerKeepingPort];
-			NSURL *playbackURL = [[MLStreamRelay sharedRelay] relayURLForStreamURL:localFileURL] ?: localFileURL;
+			s->_lastKnownTime = resumeTime;
+
+			BOOL isLegacy = ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f);
+			NSURL *playbackURL = nil;
+			if (isLegacy) {
+				[[MLStreamRelay sharedRelay] reviveListenerKeepingPort];
+				playbackURL = [[MLStreamRelay sharedRelay] relayURLForStreamURL:localFileURL];
+				if (resumeTime > 1.0) {
+					playbackURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@?startSec=%.2f", [playbackURL absoluteString], resumeTime]];
+					s->_timeOffset = resumeTime;
+				} else {
+					s->_timeOffset = 0.0f;
+				}
+			} else {
+				playbackURL = localFileURL;
+				s->_timeOffset = 0.0f;
+			}
+			if (!playbackURL) playbackURL = localFileURL;
 			s->_currentPlaybackURL = playbackURL;
+
 			AVPlayer *p = [AVPlayer playerWithURL:playbackURL];
 			[s attachPlayer:p];
-			if (resumeTime > 1.0) {
+			if (!isLegacy && resumeTime > 1.0) {
 				[p seekToTime:CMTimeMakeWithSeconds(resumeTime, NSEC_PER_SEC)];
 			}
 			s.playing = YES;
@@ -311,10 +335,20 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 			s->_currentRawStreamURL = url;
 			[[MLStreamRelay sharedRelay] reviveListenerKeepingPort];
 			NSURL *playbackURL = [[MLStreamRelay sharedRelay] relayURLForStreamURL:url] ?: url;
+			if ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f) {
+				if (resumeTime > 1.0) {
+					playbackURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@?startSec=%.2f", [playbackURL absoluteString], resumeTime]];
+					s->_timeOffset = resumeTime;
+				} else {
+					s->_timeOffset = 0.0f;
+				}
+			} else {
+				s->_timeOffset = 0.0f;
+			}
 			s->_currentPlaybackURL = playbackURL;
 			AVPlayer *p = [AVPlayer playerWithURL:playbackURL];
 			[s attachPlayer:p];
-			if (resumeTime > 1.0) {
+			if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0f && resumeTime > 1.0) {
 				[p seekToTime:CMTimeMakeWithSeconds(resumeTime, NSEC_PER_SEC)];
 			}
 			s.playing = YES;
@@ -341,12 +375,27 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 	[[MLStreamRelay sharedRelay] reviveListenerKeepingPort];
 	[self ensureAudioSessionActive];
 
-	if (_currentPlaybackURL && _retryCount <= 1) {
+	if (_currentRawStreamURL && _retryCount <= 1) {
 		self.statusError = nil;
 		self.buffering = YES;
-		AVPlayer *p = [AVPlayer playerWithURL:_currentPlaybackURL];
+		BOOL isLegacy = ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f);
+		NSURL *playbackURL = nil;
+		if (isLegacy) {
+			playbackURL = [[MLStreamRelay sharedRelay] relayURLForStreamURL:_currentRawStreamURL];
+			if (resumeTime > 1.0) {
+				playbackURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@?startSec=%.2f", [playbackURL absoluteString], resumeTime]];
+				self->_timeOffset = resumeTime;
+			} else {
+				self->_timeOffset = 0.0f;
+			}
+		} else {
+			playbackURL = [[MLStreamRelay sharedRelay] relayURLForStreamURL:_currentRawStreamURL] ?: _currentRawStreamURL;
+			self->_timeOffset = 0.0f;
+		}
+		self->_currentPlaybackURL = playbackURL;
+		AVPlayer *p = [AVPlayer playerWithURL:playbackURL];
 		[self attachPlayer:p];
-		if (resumeTime > 1.0) {
+		if (!isLegacy && resumeTime > 1.0) {
 			[p seekToTime:CMTimeMakeWithSeconds(resumeTime, NSEC_PER_SEC)];
 		}
 		self.playing = YES;
@@ -438,17 +487,18 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 			[_observedItem addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew context:NULL];
 		}
 		__weak MLPlaybackManager *wself = self;
-		_timeObserver = [player addPeriodicTimeObserverForInterval:CMTimeMakeWithSeconds(1.0, NSEC_PER_SEC)
+		_timeObserver = [player addPeriodicTimeObserverForInterval:CMTimeMakeWithSeconds(0.5, NSEC_PER_SEC)
 		                                                   queue:dispatch_get_main_queue()
 		                                              usingBlock:^(CMTime t) {
 			MLPlaybackManager *s = wself;
 			if (s) {
 				CGFloat cur = CMTIME_IS_NUMERIC(t) ? (CGFloat)CMTimeGetSeconds(t) : 0;
-				if (cur > 0.5) {
-					s->_lastKnownTime = cur;
+				CGFloat effectiveCur = cur + s->_timeOffset;
+				if (effectiveCur > 0.5f) {
+					s->_lastKnownTime = effectiveCur;
 				}
-				CGFloat skipTarget = [[MLSponsorBlockManager sharedManager] nextSkipTargetForTime:cur segments:s->_currentSponsorSegments];
-				if (skipTarget > 0.0f && skipTarget > cur) {
+				CGFloat skipTarget = [[MLSponsorBlockManager sharedManager] nextSkipTargetForTime:effectiveCur segments:s->_currentSponsorSegments];
+				if (skipTarget > 0.0f && skipTarget > effectiveCur) {
 					[s seekToTime:skipTarget];
 					[[NSNotificationCenter defaultCenter] postNotificationName:MLSponsorBlockDidSkipNotification object:nil];
 					return;
@@ -458,9 +508,12 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 					s.buffering = NO;
 				}
 				CGFloat dur = [s duration];
-				if (s.playing && dur > 5.0 && cur > 1.0 && cur >= dur - 0.5) {
-					[s itemEnded:nil];
-					return;
+				if (s.playing && dur > 5.0f && effectiveCur > 1.0f) {
+					if (effectiveCur >= dur - 0.5f) {
+						NSLog(@"[MLPlaybackManager] Song reached end (%.1fs/%.1fs), invoking itemEnded", effectiveCur, dur);
+						[s itemEnded:nil];
+						return;
+					}
 				}
 				if (wasBuffering != s.buffering) {
 					[s updateNowPlaying];
@@ -484,7 +537,7 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 				self->_retryCount = 0;
 				self.statusError = nil;
 				self.buffering = NO;
-				if ([[MLEqualizerManager sharedManager] enabled]) {
+				if (observed.audioMix == nil && [MLEqualizerManager sharedManager].enabled) {
 					[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:observed];
 				}
 				if (self.playing) {
@@ -546,6 +599,8 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 
 - (void)itemEnded:(NSNotification *)note
 {
+	NSLog(@"[MLPlaybackManager] itemEnded called (notification=%@, advancing=%d, currentTime=%.1fs, duration=%.1fs)",
+	      note.name, _advancing, [self currentTime], [self duration]);
 	if (_advancing)
 		return;
 	if (note.object && _player.currentItem && note.object != _player.currentItem)
@@ -641,6 +696,26 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 {
 	if (!_player)
 		return;
+	_lastKnownTime = seconds;
+	if ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f && _currentPlaybackURL) {
+		_timeOffset = seconds;
+		NSString *base = [[_currentPlaybackURL absoluteString] componentsSeparatedByString:@"?"][0];
+		NSURL *seekURL = (seconds > 0.5f) ? [NSURL URLWithString:[NSString stringWithFormat:@"%@?startSec=%.2f", base, seconds]] : [NSURL URLWithString:base];
+		_currentPlaybackURL = seekURL;
+		if (_observedItem) {
+			[_observedItem removeObserver:self forKeyPath:@"status"];
+			_observedItem.audioMix = nil;
+			_observedItem = nil;
+		}
+		AVPlayerItem *newItem = [AVPlayerItem playerItemWithURL:seekURL];
+		[_player replaceCurrentItemWithPlayerItem:newItem];
+		_observedItem = newItem;
+		[newItem addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew context:NULL];
+		if (_playing) [_player play];
+		[self postState];
+		return;
+	}
+	_timeOffset = 0.0f;
 	[_player seekToTime:CMTimeMakeWithSeconds(seconds, NSEC_PER_SEC)];
 	[self postState];
 }

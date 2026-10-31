@@ -4,6 +4,16 @@
 int main(int argc, char *argv[])
 {
 	@autoreleasepool {
+		NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+		NSString *docsDir = [paths firstObject];
+		if (docsDir) {
+			NSString *logPath = [docsDir stringByAppendingPathComponent:@"MetroLegacy.log"];
+			freopen([logPath UTF8String], "a", stderr);
+			setvbuf(stderr, NULL, _IOLBF, 0);
+			NSLog(@"\n\n=======================================================");
+			NSLog(@"=== MetroLegacy Launched === (iOS %@)", [[UIDevice currentDevice] systemVersion]);
+			NSLog(@"=======================================================");
+		}
 		return UIApplicationMain(argc, argv, nil, @"MLAppDelegate");
 	}
 }

@@ -13,9 +13,30 @@ static NSString *MLCacheDirectory(void)
 	static NSString *dir = nil;
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
-		NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
-		dir = [docs stringByAppendingPathComponent:@"mlimg"];
-		[[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+		NSString *caches = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) lastObject];
+		dir = [caches stringByAppendingPathComponent:@"mlimg"];
+		NSFileManager *fm = [NSFileManager defaultManager];
+		[fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+
+		// Migrate any legacy cache from Documents to Caches if present
+		NSString *oldDocs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
+		NSString *oldDir = [oldDocs stringByAppendingPathComponent:@"mlimg"];
+		if ([fm fileExistsAtPath:oldDir]) {
+			NSArray *items = [fm contentsOfDirectoryAtPath:oldDir error:nil];
+			for (NSString *item in items) {
+				NSString *src = [oldDir stringByAppendingPathComponent:item];
+				NSString *dst = [dir stringByAppendingPathComponent:item];
+				if (![fm fileExistsAtPath:dst]) {
+					[fm moveItemAtPath:src toPath:dst error:nil];
+				}
+			}
+			[fm removeItemAtPath:oldDir error:nil];
+		}
+
+		NSURL *url = [NSURL fileURLWithPath:dir];
+		if ([url respondsToSelector:@selector(setResourceValue:forKey:error:)]) {
+			[url setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
+		}
 	});
 	return dir;
 }

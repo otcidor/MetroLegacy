@@ -53,9 +53,10 @@ typedef struct {
 
 @interface MLEqualizerManager () {
 	float _bandGains[ML_EQ_NUM_BANDS];
-	NSLock *_lock;
+	NSRecursiveLock *_lock;
 	NSMutableSet *_activeStorages; // set of [NSValue valueWithPointer:storage]
 	NSArray *_presetList;
+	MLEqualizerTapStorage _coreAudioStorage;
 }
 
 - (void)registerTapStorage:(MLEqualizerTapStorage *)storage;
@@ -83,6 +84,8 @@ static void tapInit(MTAudioProcessingTapRef tap, void *clientInfo, void **tapSto
 	if (mgr) {
 		[mgr registerTapStorage:storage];
 	}
+	NSLog(@"[MLEQ] tapInit: sampleRate=%.0f, channels=%u, isFloat=%d, isInterleaved=%d",
+	      storage->sampleRate, storage->channels, storage->isFloat, storage->isInterleaved);
 }
 
 static void tapFinalize(MTAudioProcessingTapRef tap)
@@ -109,12 +112,18 @@ static void tapPrepare(MTAudioProcessingTapRef tap, CMItemCount maxFrames, const
 	MLEqualizerTapStorage *storage = (MLEqualizerTapStorage *)MTAudioProcessingTapGetStorage(tap);
 	if (!storage || !processingFormat) return;
 
+	pthread_mutex_lock(&storage->lock);
 	storage->sampleRate = (processingFormat->mSampleRate > 0) ? processingFormat->mSampleRate : 44100.0;
 	storage->channels = processingFormat->mChannelsPerFrame;
 	storage->isInterleaved = !(processingFormat->mFormatFlags & kAudioFormatFlagIsNonInterleaved);
 	storage->isFloat = (processingFormat->mFormatFlags & kAudioFormatFlagIsFloat) || (processingFormat->mBitsPerChannel == 32);
-
 	memset(storage->delays, 0, sizeof(storage->delays));
+	pthread_mutex_unlock(&storage->lock);
+
+	NSLog(@"[MLEQ] tapPrepare: sampleRate=%.0f, channels=%u, formatID=0x%X, formatFlags=0x%X, bitsPerChan=%u, bytesPerFrame=%u",
+	      storage->sampleRate, storage->channels, (unsigned int)processingFormat->mFormatID,
+	      (unsigned int)processingFormat->mFormatFlags, (unsigned int)processingFormat->mBitsPerChannel,
+	      (unsigned int)processingFormat->mBytesPerFrame);
 
 	MLEqualizerManager *mgr = (__bridge MLEqualizerManager *)storage->manager;
 	if (mgr) {
@@ -149,28 +158,45 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 
 	if (flags & kMTAudioProcessingTapFlag_StartOfStream) {
 		memset(storage->delays, 0, sizeof(storage->delays));
+		NSLog(@"[MLEqualizer] Started processing stream: sampleRate=%.0f, channels=%u, enabled=%d",
+		      storage->sampleRate, storage->channels, storage->enabled);
 	}
 
 	CMItemCount frames = *numberFramesOut;
 	if (frames <= 0) return;
 
-	// Non-blocking try-lock to protect biquadSetup and scopeBuffer from thread collision
-	if (pthread_mutex_trylock(&storage->lock) != 0) {
-		// Mutex busy during coefficient update, pass audio cleanly through to avoid glitch
-		return;
-	}
+	// Use mutex lock to guarantee that coefficients and buffers are never skipped
+	pthread_mutex_lock(&storage->lock);
 
 	if (!storage->enabled || storage->allBandsFlat || !storage->biquadSetup) {
+		static uint32_t sLogCounter = 0;
+		if ((sLogCounter++ % 150) == 0) {
+			NSLog(@"[MLEQ] tapProcess PASSTHROUGH: enabled=%d allFlat=%d biquadSetup=%p",
+			      storage->enabled, storage->allBandsFlat, storage->biquadSetup);
+		}
 		// Pass-through: copy recent audio to scope buffer for visualizer even when EQ is off
 		if (storage->isFloat && bufferListInOut->mNumberBuffers > 0) {
 			float *src = (float *)bufferListInOut->mBuffers[0].mData;
 			if (src) {
 				NSUInteger copyCount = MIN((NSUInteger)frames, (NSUInteger)ML_EQ_SCOPE_SIZE);
-				memcpy(storage->scopeBuffer, src, copyCount * sizeof(float));
+				if (storage->isInterleaved) {
+					uint32_t nc = storage->channels > 0 ? storage->channels : 1;
+					for (NSUInteger k = 0; k < copyCount; k++) {
+						storage->scopeBuffer[k] = src[k * nc];
+					}
+				} else {
+					memcpy(storage->scopeBuffer, src, copyCount * sizeof(float));
+				}
 			}
 		}
 		pthread_mutex_unlock(&storage->lock);
 		return;
+	}
+
+	static uint32_t sProcLogCounter = 0;
+	if ((sProcLogCounter++ % 150) == 0) {
+		NSLog(@"[MLEQ] tapProcess ACTIVE: processing %ld frames (preamp=%.2f)",
+		      (long)frames, storage->preampGain);
 	}
 
 	float preamp = storage->preampGain;
@@ -228,7 +254,6 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 		}
 	} else {
 		// 16-bit integer PCM fallback (SIMD converted to float and back)
-		static float floatBuffer[4096];
 		uint32_t numBuffers = storage->isInterleaved ? 1 : bufferListInOut->mNumberBuffers;
 		if (numBuffers > 2) numBuffers = 2;
 
@@ -236,7 +261,11 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 			int16_t *intSamples = (int16_t *)bufferListInOut->mBuffers[ch].mData;
 			if (!intSamples) continue;
 			vDSP_Length count = storage->isInterleaved ? frames * storage->channels : frames;
-			if (count > 4096) count = 4096;
+			if (count == 0) continue;
+
+			float stackBuf[1024];
+			float *floatBuffer = (count <= 1024) ? stackBuf : (float *)malloc(count * sizeof(float));
+			if (!floatBuffer) continue;
 
 			// int16 -> float
 			vDSP_vflt16(intSamples, 1, floatBuffer, 1, count);
@@ -249,14 +278,26 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 				if (nc > 1) {
 					vDSP_biquad(storage->biquadSetup, storage->delays[1], floatBuffer + 1, nc, floatBuffer + 1, nc, frames);
 				}
+				NSUInteger copyCount = MIN((NSUInteger)frames, (NSUInteger)ML_EQ_SCOPE_SIZE);
+				for (NSUInteger k = 0; k < copyCount; k++) {
+					storage->scopeBuffer[k] = floatBuffer[k * nc];
+				}
 			} else {
-				vDSP_biquad(storage->biquadSetup, storage->delays[ch], floatBuffer, 1, floatBuffer, 1, count);
+				vDSP_biquad(storage->biquadSetup, storage->delays[ch], floatBuffer, 1, floatBuffer, 1, frames);
+				if (ch == 0) {
+					NSUInteger copyCount = MIN((NSUInteger)frames, (NSUInteger)ML_EQ_SCOPE_SIZE);
+					memcpy(storage->scopeBuffer, floatBuffer, copyCount * sizeof(float));
+				}
 			}
 
 			vDSP_vclip(floatBuffer, 1, &clipLow, &clipHigh, floatBuffer, 1, count);
 			float unscale = 32767.0f;
 			vDSP_vsmul(floatBuffer, 1, &unscale, floatBuffer, 1, count);
 			vDSP_vfix16(floatBuffer, 1, intSamples, 1, count);
+
+			if (floatBuffer != stackBuf) {
+				free(floatBuffer);
+			}
 		}
 	}
 
@@ -281,7 +322,7 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 {
 	self = [super init];
 	if (self) {
-		_lock = [[NSLock alloc] init];
+		_lock = [[NSRecursiveLock alloc] init];
 		_activeStorages = [[NSMutableSet alloc] init];
 
 		[self setupPresets];
@@ -300,8 +341,30 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 				_bandGains[i] = 0.0f;
 			}
 		}
+
+		pthread_mutex_init(&_coreAudioStorage.lock, NULL);
+		_coreAudioStorage.manager = (__bridge void *)self;
+		_coreAudioStorage.isInterleaved = YES;
+		_coreAudioStorage.isFloat = YES;
+		_coreAudioStorage.channels = 2;
+		_coreAudioStorage.sampleRate = 44100.0;
+		_coreAudioStorage.enabled = _enabled;
+		_coreAudioStorage.allBandsFlat = YES;
+		_coreAudioStorage.preampGain = 1.0f;
+		_coreAudioStorage.biquadSetup = NULL;
+		memset(_coreAudioStorage.delays, 0, sizeof(_coreAudioStorage.delays));
+		memset(_coreAudioStorage.scopeBuffer, 0, sizeof(_coreAudioStorage.scopeBuffer));
 	}
 	return self;
+}
+
+- (void)dealloc
+{
+	if (_coreAudioStorage.biquadSetup) {
+		vDSP_biquad_DestroySetup(_coreAudioStorage.biquadSetup);
+		_coreAudioStorage.biquadSetup = NULL;
+	}
+	pthread_mutex_destroy(&_coreAudioStorage.lock);
 }
 
 - (void)setupPresets
@@ -404,6 +467,11 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 
 - (void)setGain:(float)gainDb forBand:(NSInteger)bandIndex
 {
+	[self setGain:gainDb forBand:bandIndex notify:YES];
+}
+
+- (void)setGain:(float)gainDb forBand:(NSInteger)bandIndex notify:(BOOL)notify
+{
 	if (bandIndex < 0 || bandIndex >= ML_EQ_NUM_BANDS) return;
 
 	if (gainDb > 12.0f) gainDb = 12.0f;
@@ -412,11 +480,14 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 	[_lock lock];
 	_bandGains[bandIndex] = gainDb;
 	_currentPresetId = @"custom";
-	[self updateAllActiveStorages];
 	[_lock unlock];
 
-	[self saveSettings];
-	[[NSNotificationCenter defaultCenter] postNotificationName:MLEqualizerDidChangeNotification object:self];
+	[self updateAllActiveStorages];
+
+	if (notify) {
+		[self saveSettings];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MLEqualizerDidChangeNotification object:self];
+	}
 }
 
 - (NSArray *)allBandGains
@@ -441,10 +512,11 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 		if (g < -12.0f) g = -12.0f;
 		_bandGains[i] = g;
 	}
-	[self updateAllActiveStorages];
 	[_lock unlock];
 
-	[self saveSettings];
+	[self updateAllActiveStorages];
+
+	[self synchronizeSettings];
 	[[NSNotificationCenter defaultCenter] postNotificationName:MLEqualizerDidChangeNotification object:self];
 }
 
@@ -454,20 +526,18 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 
 	[_lock lock];
 	_enabled = enabled;
-	[self updateAllActiveStorages];
 	[_lock unlock];
 
-	[self saveSettings];
+	[self updateAllActiveStorages];
+
+	[self synchronizeSettings];
 	[[NSNotificationCenter defaultCenter] postNotificationName:MLEqualizerDidChangeNotification object:self];
 
+	// Ensure current playerItem has tap attached if not already attached
 	dispatch_async(dispatch_get_main_queue(), ^{
 		AVPlayerItem *item = [MLPlaybackManager sharedManager].player.currentItem;
-		if (item && item.status == AVPlayerItemStatusReadyToPlay) {
-			if (enabled) {
-				[self attachEqualizerToPlayerItem:item];
-			} else {
-				item.audioMix = nil;
-			}
+		if (item && item.audioMix == nil) {
+			[self attachEqualizerToPlayerItem:item];
 		}
 	});
 }
@@ -481,17 +551,20 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 			break;
 		}
 	}
-	if (!target || [presetId isEqualToString:@"custom"]) return;
+	if (!target) return;
 
 	[_lock lock];
 	_currentPresetId = target.presetId;
-	for (int i = 0; i < ML_EQ_NUM_BANDS; i++) {
-		_bandGains[i] = [target.bandGains[i] floatValue];
+	if (![presetId isEqualToString:@"custom"]) {
+		for (int i = 0; i < ML_EQ_NUM_BANDS; i++) {
+			_bandGains[i] = [target.bandGains[i] floatValue];
+		}
 	}
-	[self updateAllActiveStorages];
 	[_lock unlock];
 
-	[self saveSettings];
+	[self updateAllActiveStorages];
+
+	[self synchronizeSettings];
 	[[NSNotificationCenter defaultCenter] postNotificationName:MLEqualizerDidChangeNotification object:self];
 }
 
@@ -517,11 +590,18 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 	[ud setObject:_currentPresetId forKey:kPrefEqualizerPresetId];
 
 	NSMutableArray *arr = [NSMutableArray arrayWithCapacity:ML_EQ_NUM_BANDS];
+	[_lock lock];
 	for (int i = 0; i < ML_EQ_NUM_BANDS; i++) {
 		[arr addObject:@(_bandGains[i])];
 	}
+	[_lock unlock];
 	[ud setObject:arr forKey:kPrefEqualizerBandValues];
-	[ud synchronize];
+}
+
+- (void)synchronizeSettings
+{
+	[self saveSettings];
+	[[NSUserDefaults standardUserDefaults] synchronize];
 }
 
 // MARK: - DSP Coefficients Calculation (Accelerate vDSP Biquad)
@@ -530,28 +610,31 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 {
 	if (!storage) return;
 
-	storage->enabled = _enabled;
+	pthread_mutex_lock(&storage->lock);
 	double sampleRate = storage->sampleRate > 8000.0 ? storage->sampleRate : 44100.0;
+	pthread_mutex_unlock(&storage->lock);
 
 	BOOL allFlat = YES;
 	float maxGain = 0.0f;
 
+	[_lock lock];
+	float currentBands[ML_EQ_NUM_BANDS];
+	BOOL currentEnabled = _enabled;
 	for (int i = 0; i < ML_EQ_NUM_BANDS; i++) {
-		float gainDb = _bandGains[i];
-		if (fabsf(gainDb) > 0.05f) {
+		currentBands[i] = _bandGains[i];
+		if (fabsf(currentBands[i]) > 0.05f) {
 			allFlat = NO;
 		}
-		if (gainDb > maxGain) {
-			maxGain = gainDb;
+		if (currentBands[i] > maxGain) {
+			maxGain = currentBands[i];
 		}
 	}
-	storage->allBandsFlat = allFlat;
+	[_lock unlock];
 
-	// Auto Preamp headroom: scale down input proportionally when positive boost is applied
+	float preampGain = 1.0f;
 	if (maxGain > 0.0f) {
-		storage->preampGain = powf(10.0f, -maxGain / 20.0f);
-	} else {
-		storage->preampGain = 1.0f;
+		float headroomDb = MIN(maxGain * 0.35f, 3.5f);
+		preampGain = powf(10.0f, -headroomDb / 20.0f);
 	}
 
 	// Calculate RBJ Peaking EQ coefficients for each of the 10 bands
@@ -559,7 +642,7 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 
 	for (int i = 0; i < ML_EQ_NUM_BANDS; i++) {
 		float f0 = kEQFrequencies[i];
-		float gainDb = _bandGains[i];
+		float gainDb = currentBands[i];
 		float Q = kEQDefaultQ;
 
 		if (f0 >= (float)(sampleRate * 0.49)) {
@@ -607,8 +690,11 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 	// Create new vectorized vDSP setup
 	vDSP_biquad_Setup newSetup = vDSP_biquad_CreateSetup(doubleCoeffs, ML_EQ_NUM_BANDS);
 
-	// Atomically swap under storage mutex
+	// Atomically swap all storage fields under storage mutex
 	pthread_mutex_lock(&storage->lock);
+	storage->enabled = currentEnabled;
+	storage->allBandsFlat = allFlat;
+	storage->preampGain = preampGain;
 	vDSP_biquad_Setup oldSetup = storage->biquadSetup;
 	storage->biquadSetup = newSetup;
 	if (oldSetup) {
@@ -619,7 +705,12 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 
 - (void)updateAllActiveStorages
 {
-	for (NSValue *val in _activeStorages) {
+	NSArray *storages = nil;
+	[_lock lock];
+	storages = [_activeStorages allObjects];
+	[_lock unlock];
+
+	for (NSValue *val in storages) {
 		MLEqualizerTapStorage *st = (MLEqualizerTapStorage *)[val pointerValue];
 		if (st) {
 			[self updateStorageCoefficients:st];
@@ -629,14 +720,19 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 
 - (void)registerTapStorage:(MLEqualizerTapStorage *)storage
 {
+	if (!storage) return;
+
 	[_lock lock];
 	[_activeStorages addObject:[NSValue valueWithPointer:storage]];
-	[self updateStorageCoefficients:storage];
 	[_lock unlock];
+
+	[self updateStorageCoefficients:storage];
 }
 
 - (void)unregisterTapStorage:(MLEqualizerTapStorage *)storage
 {
+	if (!storage) return;
+
 	[_lock lock];
 	[_activeStorages removeObject:[NSValue valueWithPointer:storage]];
 	[_lock unlock];
@@ -646,10 +742,12 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 {
 	if (!outBuffer || len == 0) return;
 
+	NSValue *val = nil;
 	[_lock lock];
-	NSValue *val = [_activeStorages anyObject];
-	MLEqualizerTapStorage *st = val ? (MLEqualizerTapStorage *)[val pointerValue] : NULL;
+	val = [_activeStorages anyObject];
+	[_lock unlock];
 
+	MLEqualizerTapStorage *st = val ? (MLEqualizerTapStorage *)[val pointerValue] : NULL;
 	if (st && pthread_mutex_trylock(&st->lock) == 0) {
 		NSUInteger copyCount = MIN(len, (NSUInteger)ML_EQ_SCOPE_SIZE);
 		memcpy(outBuffer, st->scopeBuffer, copyCount * sizeof(float));
@@ -660,15 +758,100 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 	} else {
 		memset(outBuffer, 0, len * sizeof(float));
 	}
-	[_lock unlock];
+}
+
+// MARK: - Direct CoreAudio PCM Processing
+
+- (void)processInterleavedFloatBuffer:(float *)samples
+                           frameCount:(UInt32)frames
+                             channels:(UInt32)channels
+                           sampleRate:(double)sampleRate
+{
+	if (!samples || frames == 0) return;
+
+	MLEqualizerTapStorage *storage = &_coreAudioStorage;
+
+	if (sampleRate > 0 && fabs(storage->sampleRate - sampleRate) > 1.0) {
+		pthread_mutex_lock(&storage->lock);
+		storage->sampleRate = sampleRate;
+		storage->channels = channels;
+		memset(storage->delays, 0, sizeof(storage->delays));
+		pthread_mutex_unlock(&storage->lock);
+		[self updateStorageCoefficients:storage];
+	}
+
+	if (pthread_mutex_trylock(&storage->lock) != 0) {
+		// Non-blocking try-lock: if mutex busy updating coefficients, pass audio cleanly
+		return;
+	}
+
+	if (!storage->enabled || storage->allBandsFlat || !storage->biquadSetup) {
+		// Pass-through: copy recent samples to scope buffer for UI visualizer
+		NSUInteger copyCount = MIN((NSUInteger)frames, (NSUInteger)ML_EQ_SCOPE_SIZE);
+		uint32_t nc = storage->channels > 0 ? storage->channels : 1;
+		for (NSUInteger k = 0; k < copyCount; k++) {
+			storage->scopeBuffer[k] = samples[k * nc];
+		}
+		pthread_mutex_unlock(&storage->lock);
+		return;
+	}
+
+	float preamp = storage->preampGain;
+	float clipLow = -1.0f;
+	float clipHigh = 1.0f;
+	uint32_t numChannels = storage->channels > 2 ? 2 : storage->channels;
+	vDSP_Length totalSamples = frames * numChannels;
+
+	// 1. Vectorized Preamp Scaling (NEON)
+	vDSP_vsmul(samples, 1, &preamp, samples, 1, totalSamples);
+
+	// 2. Vectorized 10-Band Cascaded Biquad Filtering (NEON)
+	vDSP_biquad(storage->biquadSetup, storage->delays[0], samples, numChannels, samples, numChannels, frames);
+	if (numChannels > 1) {
+		vDSP_biquad(storage->biquadSetup, storage->delays[1], samples + 1, numChannels, samples + 1, numChannels, frames);
+	}
+
+	// 3. Vectorized Saturation Clamping (NEON)
+	vDSP_vclip(samples, 1, &clipLow, &clipHigh, samples, 1, totalSamples);
+
+	// 4. Update Scope Buffer for UI Waveform Visualizer
+	NSUInteger copyCount = MIN((NSUInteger)frames, (NSUInteger)ML_EQ_SCOPE_SIZE);
+	for (NSUInteger k = 0; k < copyCount; k++) {
+		storage->scopeBuffer[k] = samples[k * numChannels];
+	}
+
+	pthread_mutex_unlock(&storage->lock);
 }
 
 // MARK: - AVPlayerItem Integration
 
+- (AVAssetTrack *)audioTrackFromPlayerItem:(AVPlayerItem *)playerItem
+{
+	if (!playerItem) return nil;
+
+	// 1. Check playerItem.tracks (populated when readyToPlay)
+	for (AVPlayerItemTrack *itemTrack in playerItem.tracks) {
+		AVAssetTrack *t = itemTrack.assetTrack;
+		if (t && [t.mediaType isEqualToString:AVMediaTypeAudio]) {
+			return t;
+		}
+	}
+
+	// 2. Check asset tracksWithMediaType
+	AVAsset *asset = playerItem.asset;
+	if (asset) {
+		NSArray *tracks = [asset tracksWithMediaType:AVMediaTypeAudio];
+		if (tracks.count > 0) {
+			return tracks[0];
+		}
+	}
+
+	return nil;
+}
+
 - (void)attachEqualizerToPlayerItem:(AVPlayerItem *)playerItem
 {
 	if (!playerItem) return;
-	if (!_enabled) return;
 	if (&MTAudioProcessingTapCreate == NULL) {
 		NSLog(@"[MLEqualizer] MTAudioProcessingTapCreate not supported on this OS");
 		return;
@@ -689,13 +872,20 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 		if ([assetURL.path hasSuffix:@".m3u8"] ||
 		    [urlStr rangeOfString:@".m3u8"].location != NSNotFound ||
 		    [urlStr rangeOfString:@"/p.m3u8"].location != NSNotFound) {
-			NSLog(@"[MLEqualizer] HLS stream detected — MTAudioProcessingTap is unsupported on HLS by AVFoundation, bypassing EQ.");
+			NSLog(@"[MLEqualizer] HLS stream detected — MTAudioProcessingTap is unsupported on HLS, bypassing EQ.");
 			return;
 		}
 	}
 
-	NSArray *audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
-	if (audioTracks.count == 0) {
+	AVAssetTrack *track = [self audioTrackFromPlayerItem:playerItem];
+	NSLog(@"[MLEQ] attachEqualizer: track=%@, playerItem.tracks=%lu, asset.tracks=%lu, status=%ld",
+	      track, (unsigned long)playerItem.tracks.count,
+	      (unsigned long)[[playerItem.asset tracksWithMediaType:AVMediaTypeAudio] count],
+	      (long)playerItem.status);
+
+	if (playerItem.status != AVPlayerItemStatusReadyToPlay && playerItem.tracks.count == 0) {
+		NSLog(@"[MLEQ] Postponing attachEqualizer until playerItem is ReadyToPlay (status=%ld, tracks=%lu)",
+		      (long)playerItem.status, (unsigned long)playerItem.tracks.count);
 		return;
 	}
 
@@ -709,22 +899,46 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 	callbacks.process = tapProcess;
 
 	MTAudioProcessingTapRef tap = NULL;
-	OSStatus err = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap);
+	OSStatus err = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PreEffects, &tap);
 	if (err != noErr || !tap) {
-		NSLog(@"[MLEqualizer] MTAudioProcessingTapCreate failed with status %d", (int)err);
+		NSLog(@"[MLEQ] MTAudioProcessingTapCreate failed with status %d", (int)err);
 		return;
 	}
 
-	AVAssetTrack *track = audioTracks[0];
-	AVMutableAudioMixInputParameters *params = [AVMutableAudioMixInputParameters audioMixInputParametersWithTrack:track];
-	params.audioTapProcessor = tap;
+	NSMutableArray *inputParamsArray = [NSMutableArray array];
+	if (track) {
+		AVMutableAudioMixInputParameters *params = [AVMutableAudioMixInputParameters audioMixInputParametersWithTrack:track];
+		params.audioTapProcessor = tap;
+		[inputParamsArray addObject:params];
+		NSLog(@"[MLEQ] Successfully attached 10-band vDSP audio tap processor to track (%d)", (int)track.trackID);
+	} else {
+		// No AVAssetTrack found (e.g. elemental ADTS stream).
+		// Use empty audioMixInputParameters with default and invalid trackIDs
+		AVMutableAudioMixInputParameters *p1 = [AVMutableAudioMixInputParameters audioMixInputParameters];
+		p1.trackID = 1;
+		p1.audioTapProcessor = tap;
+		[inputParamsArray addObject:p1];
+
+		AVMutableAudioMixInputParameters *p0 = [AVMutableAudioMixInputParameters audioMixInputParameters];
+		p0.trackID = kCMPersistentTrackID_Invalid; // 0
+		p0.audioTapProcessor = tap;
+		[inputParamsArray addObject:p0];
+
+		for (AVPlayerItemTrack *it in playerItem.tracks) {
+			if (it.assetTrack && it.assetTrack.trackID != 1 && it.assetTrack.trackID != 0) {
+				AVMutableAudioMixInputParameters *pit = [AVMutableAudioMixInputParameters audioMixInputParametersWithTrack:it.assetTrack];
+				pit.audioTapProcessor = tap;
+				[inputParamsArray addObject:pit];
+			}
+		}
+		NSLog(@"[MLEQ] Successfully attached 10-band vDSP audio tap processor with fallback parameters");
+	}
 
 	AVMutableAudioMix *audioMix = [AVMutableAudioMix audioMix];
-	audioMix.inputParameters = @[ params ];
+	audioMix.inputParameters = inputParamsArray;
 	playerItem.audioMix = audioMix;
 
 	CFRelease(tap);
-	NSLog(@"[MLEqualizer] Attached 10-band vDSP audio tap processor to track (%d)", (int)track.trackID);
 }
 
 @end

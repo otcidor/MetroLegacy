@@ -30,8 +30,10 @@ extern NSString *const MLEqualizerDidChangeNotification;
 - (NSString *)shortFrequencyStringForBand:(NSInteger)bandIndex;
 - (float)gainForBand:(NSInteger)bandIndex;
 - (void)setGain:(float)gainDb forBand:(NSInteger)bandIndex;
+- (void)setGain:(float)gainDb forBand:(NSInteger)bandIndex notify:(BOOL)notify;
 - (NSArray *)allBandGains;
 - (void)setAllBandGains:(NSArray *)gains;
+- (void)synchronizeSettings;
 
 // Presets (21 TuneShell calibrated presets + Flat + Custom)
 - (void)applyPresetWithId:(NSString *)presetId;
@@ -40,6 +42,9 @@ extern NSString *const MLEqualizerDidChangeNotification;
 
 // Audio tap attachment to player item
 - (void)attachEqualizerToPlayerItem:(AVPlayerItem *)playerItem;
+
+// Direct PCM processing for CoreAudio AudioQueue / AudioUnit pipeline
+- (void)processInterleavedFloatBuffer:(float *)samples frameCount:(UInt32)frameCount channels:(UInt32)channels sampleRate:(double)sampleRate;
 
 // Visualizer waveform data (reads recent post-EQ samples, range -1.0 to 1.0)
 - (void)getScopeData:(float *)outBuffer length:(NSUInteger)len;

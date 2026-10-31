@@ -193,6 +193,108 @@ static NSArray *MLParseSidxSegments(NSData *headerData, uint32_t *outTimescale)
 	return segments;
 }
 
+static NSData *MLExtractAdtsFromMp4Fragment(NSData *fragData, uint32_t timescale, int channels)
+{
+	if (!fragData || fragData.length < 16)
+		return nil;
+
+	const uint8_t *bytes = (const uint8_t *)fragData.bytes;
+	size_t len = fragData.length;
+
+	// Locate moof and trun
+	const uint8_t *trunPtr = NULL;
+	for (size_t i = 0; i + 8 <= len; i++) {
+		if (bytes[i] == 't' && bytes[i+1] == 'r' && bytes[i+2] == 'u' && bytes[i+3] == 'n') {
+			trunPtr = bytes + i;
+			break;
+		}
+	}
+	if (!trunPtr || (size_t)(trunPtr - bytes + 12) > len)
+		return nil;
+
+	uint32_t flags = ((uint32_t)trunPtr[5] << 16) | ((uint32_t)trunPtr[6] << 8) | (uint32_t)trunPtr[7];
+	uint32_t sampleCount = ((uint32_t)trunPtr[8] << 24) | ((uint32_t)trunPtr[9] << 16) |
+	                       ((uint32_t)trunPtr[10] << 8) | (uint32_t)trunPtr[11];
+
+	const uint8_t *cur = trunPtr + 12;
+	if (flags & 0x0001) cur += 4; // data_offset
+	if (flags & 0x0004) cur += 4; // first_sample_flags
+	BOOL hasDur = (flags & 0x0100) != 0;
+	BOOL hasSz  = (flags & 0x0200) != 0;
+	BOOL hasFlg = (flags & 0x0400) != 0;
+	BOOL hasCto = (flags & 0x0800) != 0;
+
+	if (!hasSz || sampleCount == 0 || sampleCount > 5000)
+		return nil;
+
+	uint32_t *sampleSizes = malloc(sizeof(uint32_t) * sampleCount);
+	if (!sampleSizes)
+		return nil;
+
+	for (uint32_t i = 0; i < sampleCount; i++) {
+		if (cur + 4 > bytes + len) {
+			free(sampleSizes);
+			return nil;
+		}
+		if (hasDur) cur += 4;
+		sampleSizes[i] = ((uint32_t)cur[0] << 24) | ((uint32_t)cur[1] << 16) |
+		                 ((uint32_t)cur[2] << 8)  | (uint32_t)cur[3];
+		cur += 4;
+		if (hasFlg) cur += 4;
+		if (hasCto) cur += 4;
+	}
+
+	// Locate mdat
+	const uint8_t *mdatPayload = NULL;
+	for (size_t i = 0; i + 8 <= len; i++) {
+		if (bytes[i] == 'm' && bytes[i+1] == 'd' && bytes[i+2] == 'a' && bytes[i+3] == 't') {
+			mdatPayload = bytes + i + 4; // after 'mdat' header tag (payload starts at i + 4)
+			break;
+		}
+	}
+	if (!mdatPayload) {
+		free(sampleSizes);
+		return nil;
+	}
+
+	uint8_t freqIdx = 4; // 44100 Hz default
+	if (timescale == 48000) freqIdx = 3;
+	else if (timescale == 44100) freqIdx = 4;
+	else if (timescale == 32000) freqIdx = 5;
+	else if (timescale == 24000) freqIdx = 6;
+	else if (timescale == 22050) freqIdx = 7;
+	else if (timescale == 16000) freqIdx = 8;
+	uint8_t chan = (channels > 0) ? (uint8_t)channels : 2;
+	uint8_t profile = 1; // AAC-LC
+
+	NSMutableData *adtsOut = [NSMutableData dataWithCapacity:fragData.length + sampleCount * 7];
+	const uint8_t *sampleCur = mdatPayload;
+
+	for (uint32_t i = 0; i < sampleCount; i++) {
+		uint32_t sSz = sampleSizes[i];
+		if (sampleCur + sSz > bytes + len)
+			break;
+
+		uint32_t frameLen = sSz + 7;
+		uint8_t adts[7];
+		adts[0] = 0xFF;
+		adts[1] = 0xF1;
+		adts[2] = ((profile & 3) << 6) | ((freqIdx & 0xF) << 2) | ((chan >> 2) & 1);
+		adts[3] = ((chan & 3) << 6) | ((frameLen >> 11) & 3);
+		adts[4] = (uint8_t)((frameLen >> 3) & 0xFF);
+		adts[5] = (uint8_t)(((frameLen & 7) << 5) | 0x1F);
+		adts[6] = 0xFC;
+
+		[adtsOut appendBytes:adts length:7];
+		[adtsOut appendBytes:sampleCur length:sSz];
+
+		sampleCur += sSz;
+	}
+
+	free(sampleSizes);
+	return adtsOut;
+}
+
 static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_t timescale, int channels)
 {
 	if (!fragData || fragData.length < 16)
@@ -384,6 +486,9 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	NSMutableDictionary *_segmentsMap;
 	NSMutableDictionary *_playlistMap;
 	NSMutableDictionary *_timescaleMap;
+	NSMutableDictionary *_durationMap;
+	NSMutableDictionary *_finishedMap;
+	NSMutableDictionary *_highestSegMap;
 	NSLock *_lock;
 	NSUInteger _generation;
 	NSUInteger _listenerId;
@@ -416,6 +521,9 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 		_segmentsMap = [[NSMutableDictionary alloc] init];
 		_playlistMap = [[NSMutableDictionary alloc] init];
 		_timescaleMap = [[NSMutableDictionary alloc] init];
+		_durationMap = [[NSMutableDictionary alloc] init];
+		_finishedMap = [[NSMutableDictionary alloc] init];
+		_highestSegMap = [[NSMutableDictionary alloc] init];
 		_acceptQueue = dispatch_queue_create("win.otcidor.MLStreamRelay.accept", DISPATCH_QUEUE_CONCURRENT);
 		_workerQueue = dispatch_queue_create("win.otcidor.MLStreamRelay.worker", DISPATCH_QUEUE_CONCURRENT);
 
@@ -582,6 +690,8 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	[_segmentsMap removeAllObjects];
 	[_playlistMap removeAllObjects];
 	[_timescaleMap removeAllObjects];
+	[_durationMap removeAllObjects];
+	[_finishedMap removeAllObjects];
 	[_lock unlock];
 }
 
@@ -590,12 +700,22 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	if (!remoteStreamURL)
 		return nil;
 
+	// Local files (cached or downloaded) can be played directly without loopback proxy on iOS 7+.
+	// On iOS 6 (< 7.0f), local DASH fMP4 files cannot be opened by AVPlayer directly (causes -12842),
+	// so they must be demuxed and served via stream.aac.
+	BOOL isLegacyIOS = ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f);
+	if (!isLegacyIOS && remoteStreamURL.isFileURL) {
+		return remoteStreamURL;
+	}
+
 	[self reviveListenerKeepingPort];
 
 	[_lock lock];
 	_generation++;
 	NSString *streamId = [NSString stringWithFormat:@"%lu", (unsigned long)_generation];
 	_urlMap[streamId] = remoteStreamURL;
+	[_finishedMap removeObjectForKey:streamId];
+	[_highestSegMap removeObjectForKey:streamId];
 
 	// For local downloaded or cached files, pre-populate total length from file attributes
 	if (remoteStreamURL.isFileURL) {
@@ -620,17 +740,69 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 			[_segmentsMap removeObjectForKey:oldKey];
 			[_playlistMap removeObjectForKey:oldKey];
 			[_timescaleMap removeObjectForKey:oldKey];
+			[_durationMap removeObjectForKey:oldKey];
+			[_finishedMap removeObjectForKey:oldKey];
+			[_highestSegMap removeObjectForKey:oldKey];
 		}
 	}
 	[_lock unlock];
 
-	BOOL useHls = ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f);
 	NSString *localURL = nil;
-	if (useHls) {
-		localURL = [NSString stringWithFormat:@"http://127.0.0.1:%u/%@/p.m3u8", self.port, streamId];
+	if (isLegacyIOS) {
+		localURL = [NSString stringWithFormat:@"http://127.0.0.1:%u/%@/stream.aac", self.port, streamId];
 	} else {
 		localURL = [NSString stringWithFormat:@"http://127.0.0.1:%u/%@/stream.mp4", self.port, streamId];
 	}
+	return [NSURL URLWithString:localURL];
+}
+
+- (NSURL *)aacRelayURLForStreamURL:(NSURL *)remoteStreamURL
+{
+	if (!remoteStreamURL)
+		return nil;
+
+	BOOL isLegacyIOS = ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f);
+	if (!isLegacyIOS && remoteStreamURL.isFileURL) {
+		return remoteStreamURL;
+	}
+
+	[self reviveListenerKeepingPort];
+
+	[_lock lock];
+	_generation++;
+	NSString *streamId = [NSString stringWithFormat:@"%lu", (unsigned long)_generation];
+	_urlMap[streamId] = remoteStreamURL;
+	[_finishedMap removeObjectForKey:streamId];
+	[_highestSegMap removeObjectForKey:streamId];
+
+	if (remoteStreamURL.isFileURL) {
+		NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:[remoteStreamURL path] error:nil];
+		if (attrs && [attrs fileSize] > 0) {
+			_totalLengthMap[streamId] = @([attrs fileSize]);
+		}
+	}
+
+	if (_urlMap.count > 12) {
+		NSMutableArray *toRemove = [NSMutableArray array];
+		for (NSString *key in _urlMap.allKeys) {
+			NSUInteger keyGen = (NSUInteger)[key integerValue];
+			if (keyGen + 10 < _generation) {
+				[toRemove addObject:key];
+			}
+		}
+		for (NSString *oldKey in toRemove) {
+			[_urlMap removeObjectForKey:oldKey];
+			[_totalLengthMap removeObjectForKey:oldKey];
+			[_segmentsMap removeObjectForKey:oldKey];
+			[_playlistMap removeObjectForKey:oldKey];
+			[_timescaleMap removeObjectForKey:oldKey];
+			[_finishedMap removeObjectForKey:oldKey];
+			[_highestSegMap removeObjectForKey:oldKey];
+		}
+	}
+	[_lock unlock];
+
+	NSString *localURL = [NSString stringWithFormat:@"http://127.0.0.1:%u/%@/stream.aac", self.port, streamId];
 	return [NSURL URLWithString:localURL];
 }
 
@@ -767,6 +939,22 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 		      start, end, attempt + 1, (long)code, (unsigned long)data.length, err.localizedDescription);
 
 		if (code == 416) {
+			if (end >= start) {
+				// Range end was beyond total file size (common on final DASH fragment). Retry requesting from start to EOF.
+				NSMutableURLRequest *openReq = [NSMutableURLRequest requestWithURL:remoteURL
+				                                                       cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+				                                                   timeoutInterval:20.0];
+				openReq.HTTPShouldHandleCookies = NO;
+				[openReq setValue:[NSString stringWithFormat:@"bytes=%lld-", start] forHTTPHeaderField:@"Range"];
+				[openReq setValue:MLRelayUpstreamUserAgent forHTTPHeaderField:@"User-Agent"];
+				NSHTTPURLResponse *openResp = nil;
+				NSError *openErr = nil;
+				NSData *openData = [MLTLSTrustManager sendSynchronousRequest:openReq returningResponse:&openResp error:&openErr];
+				if (openData.length > 0 && (openResp.statusCode == 200 || openResp.statusCode == 206 || openResp.statusCode == 0)) {
+					if (outResp) *outResp = openResp;
+					return openData;
+				}
+			}
 			break;
 		}
 	}
@@ -827,7 +1015,8 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	NSString *streamId = nil;
 	for (NSString *comp in pathComponents) {
 		if (comp.length && ![comp hasPrefix:@"stream"] && ![comp hasSuffix:@".mp4"] &&
-		    ![comp hasSuffix:@".m3u8"] && ![comp isEqualToString:@"s"] && ![comp hasSuffix:@".ts"]) {
+		    ![comp hasSuffix:@".m3u8"] && ![comp isEqualToString:@"s"] && ![comp hasSuffix:@".ts"] &&
+		    ![comp hasSuffix:@".aac"]) {
 			streamId = comp;
 			break;
 		}
@@ -888,8 +1077,10 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 
 			if (segments.count > 0) {
 				double maxDur = 10.0;
+				double totalAudioDur = 0.0;
 				for (MLSidxSegment *s in segments) {
 					if (s.duration > maxDur) maxDur = s.duration;
+					totalAudioDur += s.duration;
 				}
 				NSMutableString *m3u8 = [NSMutableString stringWithFormat:
 					@"#EXTM3U\n"
@@ -912,6 +1103,9 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 				_segmentsMap[streamId] = segments;
 				_timescaleMap[streamId] = @(timescale);
 				_playlistMap[streamId] = cachedPlaylist;
+				if (totalAudioDur > 0.0) {
+					_durationMap[streamId] = @(totalAudioDur);
+				}
 				[_lock unlock];
 			} else {
 				NSLog(@"[MLStreamRelay] Failed to parse sidx segments for %@ (header bytes: %lu, http: %ld)",
@@ -998,6 +1192,191 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 
 		const char *notFound = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
 		MLWriteAll(clientFD, notFound, strlen(notFound));
+		close(clientFD);
+		return;
+	}
+
+	// -------------------------------------------------------------
+	// Path 2.5: Progressive ADTS AAC Streaming (/streamId/stream.aac) (iOS 6)
+	// -------------------------------------------------------------
+	if ([path hasSuffix:@"stream.aac"] || [path hasSuffix:@".aac"]) {
+		double startSec = 0.0;
+		BOOL hasStartSec = NO;
+		NSRange qRange = [rawPath rangeOfString:@"startSec="];
+		if (qRange.location != NSNotFound) {
+			NSString *secStr = [rawPath substringFromIndex:qRange.location + 9];
+			NSRange ampRange = [secStr rangeOfString:@"&"];
+			if (ampRange.location != NSNotFound) {
+				secStr = [secStr substringToIndex:ampRange.location];
+			}
+			startSec = [secStr doubleValue];
+			hasStartSec = YES;
+		}
+
+		BOOL isAlreadyFinished = NO;
+		[_lock lock];
+		isAlreadyFinished = [_finishedMap[streamId] boolValue];
+		[_lock unlock];
+
+		if (!hasStartSec && isAlreadyFinished) {
+			NSLog(@"[MLStreamRelay] Stream %@ already completed. Serving EOF to prevent looping.", streamId);
+			NSString *eofHdr = @"HTTP/1.1 200 OK\r\n"
+			                    @"Content-Type: audio/aac\r\n"
+			                    @"Content-Length: 0\r\n"
+			                    @"Connection: close\r\n\r\n";
+			NSData *eofData = [eofHdr dataUsingEncoding:NSASCIIStringEncoding];
+			MLWriteAll(clientFD, eofData.bytes, eofData.length);
+			shutdown(clientFD, SHUT_WR);
+			char drainBuf[256];
+			while (read(clientFD, drainBuf, sizeof(drainBuf)) > 0) {}
+			close(clientFD);
+			return;
+		}
+
+		if (hasStartSec) {
+			[_lock lock];
+			[_finishedMap removeObjectForKey:streamId];
+			[_highestSegMap removeObjectForKey:streamId];
+			[_lock unlock];
+		}
+
+		NSArray *segments = nil;
+		uint32_t timescale = 44100;
+		[_lock lock];
+		segments = _segmentsMap[streamId];
+		timescale = [_timescaleMap[streamId] unsignedIntValue] ?: 44100;
+		[_lock unlock];
+
+		if (!segments.count) {
+			NSHTTPURLResponse *httpResp = nil;
+			NSData *headerData = [self fetchRangeStart:0 end:65535 fromURL:remoteURL httpResponse:&httpResp];
+
+			// Ensure full sidx box is loaded if it extends beyond 64KB
+			if (headerData.length >= 8) {
+				const uint8_t *hBytes = (const uint8_t *)headerData.bytes;
+				size_t hLen = headerData.length;
+				for (size_t i = 4; i + 8 <= hLen; i++) {
+					if (hBytes[i] == 's' && hBytes[i+1] == 'i' && hBytes[i+2] == 'd' && hBytes[i+3] == 'x') {
+						size_t sBoxStart = i - 4;
+						uint32_t bSz = ((uint32_t)hBytes[sBoxStart] << 24) | ((uint32_t)hBytes[sBoxStart+1] << 16) |
+						               ((uint32_t)hBytes[sBoxStart+2] << 8) | (uint32_t)hBytes[sBoxStart+3];
+						if (bSz >= 32 && sBoxStart + bSz > hLen) {
+							long long neededEnd = (long long)(sBoxStart + bSz + 16);
+							NSData *fullHeader = [self fetchRangeStart:0 end:neededEnd fromURL:remoteURL httpResponse:&httpResp];
+							if (fullHeader.length > headerData.length) {
+								headerData = fullHeader;
+							}
+						}
+						break;
+					}
+				}
+			}
+
+			segments = MLParseSidxSegments(headerData, &timescale);
+			if (segments.count > 0) {
+				double totalAudioDur = 0.0;
+				for (MLSidxSegment *s in segments) {
+					totalAudioDur += s.duration;
+				}
+				[_lock lock];
+				_segmentsMap[streamId] = segments;
+				_timescaleMap[streamId] = @(timescale);
+				if (totalAudioDur > 0.0) {
+					_durationMap[streamId] = @(totalAudioDur);
+				}
+				[_lock unlock];
+			}
+		}
+
+		if (!segments.count) {
+			NSLog(@"[MLStreamRelay] No sidx segments found for AAC stream %@", streamId);
+			const char *notFound = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
+			MLWriteAll(clientFD, notFound, strlen(notFound));
+			close(clientFD);
+			return;
+		}
+
+		NSUInteger startSegIndex = 0;
+		if (startSec > 0.0) {
+			double accTime = 0.0;
+			for (NSUInteger i = 0; i < segments.count; i++) {
+				MLSidxSegment *seg = segments[i];
+				if (accTime + seg.duration > startSec) {
+					startSegIndex = i;
+					break;
+				}
+				accTime += seg.duration;
+			}
+		}
+
+		NSString *respHdr = @"HTTP/1.1 200 OK\r\n"
+		                    @"Content-Type: audio/aac\r\n"
+		                    @"Accept-Ranges: none\r\n"
+		                    @"Connection: close\r\n\r\n";
+		NSData *hdrData = [respHdr dataUsingEncoding:NSASCIIStringEncoding];
+		if (!MLWriteAll(clientFD, hdrData.bytes, hdrData.length)) {
+			close(clientFD);
+			return;
+		}
+		if (isHead) {
+			close(clientFD);
+			return;
+		}
+
+		NSLog(@"[MLStreamRelay] Streaming progressive ADTS AAC for %@ (startSeg=%lu/%lu, startSec=%.2f)",
+		      streamId, (unsigned long)startSegIndex, (unsigned long)segments.count, startSec);
+
+		BOOL successfullyFinished = NO;
+		for (NSUInteger i = startSegIndex; i < segments.count; i++) {
+			MLSidxSegment *targetSeg = segments[i];
+			NSHTTPURLResponse *httpResp = nil;
+			NSData *rawFragData = nil;
+			for (int fragAttempt = 0; fragAttempt < 3; fragAttempt++) {
+				rawFragData = [self fetchRangeStart:targetSeg.startOffset
+				                                end:targetSeg.endOffset
+				                            fromURL:remoteURL
+				                       httpResponse:&httpResp];
+				if (rawFragData.length > 0) {
+					break;
+				}
+				usleep(250000);
+			}
+			if (!rawFragData.length) {
+				NSLog(@"[MLStreamRelay] Failed to fetch fragment %lu after 3 attempts for AAC stream %@", (unsigned long)i, streamId);
+				break;
+			}
+
+			NSData *adtsData = MLExtractAdtsFromMp4Fragment(rawFragData, timescale, 2);
+			if (!adtsData.length) {
+				NSLog(@"[MLStreamRelay] Failed to extract ADTS from fragment %lu for AAC stream %@", (unsigned long)i, streamId);
+				break;
+			}
+
+			if (!MLWriteAll(clientFD, adtsData.bytes, adtsData.length)) {
+				// Client closed connection (e.g. paused, skipped, or seeked)
+				break;
+			}
+
+			[_lock lock];
+			_highestSegMap[streamId] = @(i);
+			[_lock unlock];
+
+			if (i == segments.count - 1) {
+				successfullyFinished = YES;
+			}
+		}
+
+		[_lock lock];
+		NSNumber *highestNum = _highestSegMap[streamId];
+		if (successfullyFinished || (highestNum && [highestNum unsignedIntegerValue] + 1 >= segments.count)) {
+			_finishedMap[streamId] = @YES;
+			NSLog(@"[MLStreamRelay] Stream %@ successfully marked finished (%lu segments)", streamId, (unsigned long)segments.count);
+		}
+		[_lock unlock];
+
+		shutdown(clientFD, SHUT_WR);
+		char drainBuf[256];
+		while (read(clientFD, drainBuf, sizeof(drainBuf)) > 0) {}
 		close(clientFD);
 		return;
 	}
@@ -1117,6 +1496,46 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	}
 
 	close(clientFD);
+}
+
+- (NSTimeInterval)durationForStreamURL:(NSURL *)url
+{
+	if (!url) return 0;
+	NSString *streamId = nil;
+	NSArray *comps = [url.path componentsSeparatedByString:@"/"];
+	for (NSString *comp in comps) {
+		if (comp.length && ![comp hasPrefix:@"stream"] && ![comp hasSuffix:@".mp4"] &&
+		    ![comp hasSuffix:@".m3u8"] && ![comp isEqualToString:@"s"] && ![comp hasSuffix:@".ts"] &&
+		    ![comp hasSuffix:@".aac"]) {
+			streamId = comp;
+			break;
+		}
+	}
+	if (!streamId) return 0;
+	[_lock lock];
+	NSTimeInterval dur = [_durationMap[streamId] doubleValue];
+	[_lock unlock];
+	return dur;
+}
+
+- (BOOL)isStreamFinishedForURL:(NSURL *)url
+{
+	if (!url) return NO;
+	NSString *streamId = nil;
+	NSArray *comps = [url.path componentsSeparatedByString:@"/"];
+	for (NSString *comp in comps) {
+		if (comp.length && ![comp hasPrefix:@"stream"] && ![comp hasSuffix:@".mp4"] &&
+		    ![comp hasSuffix:@".m3u8"] && ![comp isEqualToString:@"s"] && ![comp hasSuffix:@".ts"] &&
+		    ![comp hasSuffix:@".aac"]) {
+			streamId = comp;
+			break;
+		}
+	}
+	if (!streamId) return NO;
+	[_lock lock];
+	BOOL fin = [_finishedMap[streamId] boolValue];
+	[_lock unlock];
+	return fin;
 }
 
 @end
