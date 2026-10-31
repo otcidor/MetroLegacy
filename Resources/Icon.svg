@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="vBg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#222228"/>
+      <stop offset="60%" stop-color="#141417"/>
+      <stop offset="100%" stop-color="#0a0a0c"/>
+    </radialGradient>
+    <radialGradient id="vLabel" cx="40%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#FF3358"/>
+      <stop offset="60%" stop-color="#D90835"/>
+      <stop offset="100%" stop-color="#88001E"/>
+    </radialGradient>
+    <linearGradient id="vSheen1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="35%" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.0"/>
+    </linearGradient>
+    <linearGradient id="vSheen2" x1="100%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="35%" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.0"/>
+    </linearGradient>
+    <filter id="vDrop" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+    <filter id="playShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- Solid Square Background (clipped naturally by iOS / rounded by HIG) -->
+  <rect width="512" height="512" fill="url(#vBg)"/>
+
+  <!-- Vinyl Grooves -->
+  <circle cx="256" cy="256" r="236" fill="none" stroke="#25252c" stroke-width="1.5"/>
+  <circle cx="256" cy="256" r="222" fill="none" stroke="#18181d" stroke-width="2"/>
+  <circle cx="256" cy="256" r="206" fill="none" stroke="#232329" stroke-width="1.2"/>
+  <circle cx="256" cy="256" r="190" fill="none" stroke="#1a1a1f" stroke-width="1.8"/>
+  <circle cx="256" cy="256" r="174" fill="none" stroke="#26262d" stroke-width="1"/>
+  <circle cx="256" cy="256" r="158" fill="none" stroke="#1c1c21" stroke-width="1.5"/>
+  <circle cx="256" cy="256" r="142" fill="none" stroke="#222227" stroke-width="1"/>
+
+  <!-- Vinyl Light Sheens (Opposite quadrants) -->
+  <path d="M 256 256 L 105 25 A 236 236 0 0 1 215 22 Z" fill="url(#vSheen1)"/>
+  <path d="M 256 256 L 407 487 A 236 236 0 0 1 297 490 Z" fill="url(#vSheen2)"/>
+
+  <!-- Center Red Label -->
+  <circle cx="256" cy="256" r="114" fill="url(#vLabel)" filter="url(#vDrop)"/>
+  <circle cx="256" cy="256" r="108" fill="none" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1.5"/>
+  <circle cx="256" cy="256" r="92" fill="none" stroke="#ffffff" stroke-opacity="0.15" stroke-dasharray="3,6" stroke-width="1"/>
+  <circle cx="256" cy="256" r="64" fill="none" stroke="#ffffff" stroke-opacity="0.2" stroke-width="1"/>
+
+  <!-- Soundwave tick marks at top of label -->
+  <g fill="#ffffff" opacity="0.95">
+    <rect x="252" y="162" width="8" height="20" rx="4"/>
+    <rect x="236" y="167" width="8" height="15" rx="4"/>
+    <rect x="268" y="167" width="8" height="15" rx="4"/>
+    <rect x="220" y="174" width="8" height="10" rx="4"/>
+    <rect x="284" y="174" width="8" height="10" rx="4"/>
+    
+    <!-- Metro dots at bottom -->
+    <circle cx="256" cy="334" r="4.5" fill="#ffffff" opacity="0.8"/>
+    <circle cx="238" cy="332" r="3.5" fill="#ffffff" opacity="0.5"/>
+    <circle cx="274" cy="332" r="3.5" fill="#ffffff" opacity="0.5"/>
+  </g>
+
+  <!-- Mathematically & Optically Centered Play Button (Centroid exactly at cx=256, cy=256) -->
+  <path d="M 237 218 
+           C 233 215, 229 217, 229 222 
+           L 229 290 
+           C 229 295, 233 297, 237 294 
+           L 299 260 
+           C 303 258, 303 254, 299 252 
+           Z" 
+        fill="#FFFFFF" 
+        filter="url(#playShadow)"/>
+</svg>
