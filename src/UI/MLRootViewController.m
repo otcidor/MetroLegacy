@@ -177,7 +177,7 @@
 	_tabBarView.frame = tabFrame;
 
 	BOOL miniVisible = !_miniPlayer.hidden;
-	CGFloat miniH = 58.0f;
+	CGFloat miniH = MLLengthMiniPlayer;
 	CGFloat miniMargin = 10.0f;
 	CGFloat miniBottomGap = 8.0f;
 	CGFloat miniY = bounds.size.height - tabH - miniH - miniBottomGap;

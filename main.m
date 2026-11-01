@@ -7,6 +7,7 @@ int main(int argc, char *argv[])
 		NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
 		NSString *docsDir = [paths firstObject];
 		if (docsDir) {
+			[[NSFileManager defaultManager] createDirectoryAtPath:docsDir withIntermediateDirectories:YES attributes:nil error:NULL];
 			NSString *logPath = [docsDir stringByAppendingPathComponent:@"MetroLegacy.log"];
 			freopen([logPath UTF8String], "a", stderr);
 			setvbuf(stderr, NULL, _IOLBF, 0);

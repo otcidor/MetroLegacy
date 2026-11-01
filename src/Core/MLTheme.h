@@ -82,7 +82,7 @@ extern NSString *const MLThemeDidChangeNotification;
  * Shared metrics, ported from Metrolist Dimensions.kt (dp ~ pt).
  */
 extern const CGFloat MLLengthTabBar;        // 64 (slim nav bar pref)
-extern const CGFloat MLLengthMiniPlayer;    // 64
+extern const CGFloat MLLengthMiniPlayer;    // 60
 extern const CGFloat MLLengthListItem;      // 64
 extern const CGFloat MLLengthThumbnailList; // 48
 extern const CGFloat MLLengthThumbnailGrid; // 128

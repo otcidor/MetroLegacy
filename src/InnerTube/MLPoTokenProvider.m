@@ -237,6 +237,12 @@ typedef enum {
 	}
 }
 
+- (void)dealloc
+{
+	[self teardown];
+	[_initWatchdog invalidate];
+}
+
 - (void)advanceState:(MLPotState)newState
 {
 	_state = newState;

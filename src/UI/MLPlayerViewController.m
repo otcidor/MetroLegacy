@@ -1054,13 +1054,19 @@ static CGPathRef MLCreateRoundedRectPath(CGRect rect, CGFloat tl, CGFloat tr, CG
 
 	if (!_seeking) {
 		CGFloat dur = pm.duration ?: item.duration;
-		_seekBar.value = dur > 0 ? MIN(1.0f, pm.currentTime / dur) : 0;
+		CGFloat cur = pm.currentTime;
+		
+		// Always show elapsed time
+		_elapsedLabel.text = MLFormatDuration(cur);
+		
 		if (dur > 0) {
-			_elapsedLabel.text = MLFormatDuration(pm.currentTime);
+			// Known duration: show progress and remaining time
+			_seekBar.value = MIN(1.0f, MAX(0.0f, cur / dur));
 			_durationLabel.text = MLFormatDuration(dur);
 		} else {
-			_elapsedLabel.text = @"0:00";
-			_durationLabel.text = @"0:00";
+			// Unknown duration: show elapsed, progress bar at 0 (or indeterminate)
+			_seekBar.value = 0;
+			_durationLabel.text = @"--:--";
 		}
 	}
 

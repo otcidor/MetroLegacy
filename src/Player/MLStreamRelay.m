@@ -702,7 +702,7 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 
 	// Local files (cached or downloaded) can be played directly without loopback proxy on iOS 7+.
 	// On iOS 6 (< 7.0f), local DASH fMP4 files cannot be opened by AVPlayer directly (causes -12842),
-	// so they must be demuxed and served via stream.aac.
+	// so they must be served via the relay (stream.mp4).
 	BOOL isLegacyIOS = ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f);
 	if (!isLegacyIOS && remoteStreamURL.isFileURL) {
 		return remoteStreamURL;
@@ -747,6 +747,8 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	}
 	[_lock unlock];
 
+	// On iOS 6, AVPlayer cannot open local fMP4 (error -12842), so serve ADTS AAC.
+	// On iOS 7+, serve progressive MP4 which exposes audio track for MTAudioProcessingTap EQ.
 	NSString *localURL = nil;
 	if (isLegacyIOS) {
 		localURL = [NSString stringWithFormat:@"http://127.0.0.1:%u/%@/stream.aac", self.port, streamId];

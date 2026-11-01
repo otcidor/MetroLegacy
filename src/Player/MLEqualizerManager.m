@@ -5,8 +5,71 @@
 #import <Accelerate/Accelerate.h>
 #import <pthread.h>
 #import <math.h>
+#import <dlfcn.h>
 
 NSString *const MLEqualizerDidChangeNotification = @"MLEqualizerDidChangeNotification";
+
+// Runtime vDSP_biquad availability (iOS 8+ only; iOS 6/7 lack symbols)
+static BOOL MLvDSPBiquadAvailable = NO;
+static dispatch_once_t MLvDSPBiquadOnceToken;
+
+static inline BOOL MLEnsureVDSPBiquadAvailable(void) {
+	dispatch_once(&MLvDSPBiquadOnceToken, ^{
+		void *handle = dlopen("/System/Library/Frameworks/Accelerate.framework/Accelerate", RTLD_LAZY | RTLD_LOCAL);
+		if (handle) {
+			MLvDSPBiquadAvailable = (dlsym(handle, "vDSP_biquad_CreateSetup") != NULL);
+			dlclose(handle);
+		}
+	});
+	return MLvDSPBiquadAvailable;
+}
+
+// ============================================================================
+// Manual Biquad Implementation (Direct Form II Transposed)
+// Used on iOS 6/7 where vDSP_biquad is unavailable.
+// Coefficients layout per section: [b0, b1, b2, a1, a2] (a0 normalized to 1.0)
+// ============================================================================
+
+typedef struct {
+	double coeffs[5 * ML_EQ_NUM_BANDS]; // 5 coeffs per band: b0,b1,b2,a1,a2
+	float delays[2][2 * ML_EQ_NUM_BANDS]; // delay lines per channel: [w1, w2] per section
+} MLManualBiquadState;
+
+static inline void MLManualBiquadInit(MLManualBiquadState *state, const double *coeffs) {
+	if (!state) return;
+	memcpy(state->coeffs, coeffs, sizeof(double) * 5 * ML_EQ_NUM_BANDS);
+	memset(state->delays, 0, sizeof(state->delays));
+}
+
+static inline void MLManualBiquadProcessInPlace(MLManualBiquadState *state,
+                                                float *samples, uint32_t numChannels,
+                                                uint32_t frames) {
+	if (!state) return;
+	
+	for (uint32_t ch = 0; ch < numChannels; ch++) {
+		float *data = samples + ch;
+		float *delay = state->delays[ch];
+		
+		for (uint32_t n = 0; n < frames; n++) {
+			float x = data[n * numChannels];
+			float y = x;
+			
+			for (int band = 0; band < ML_EQ_NUM_BANDS; band++) {
+				const double *c = &state->coeffs[band * 5];
+				double b0 = c[0], b1 = c[1], b2 = c[2];
+				double a1 = c[3], a2 = c[4];
+				
+				double w = y - a1 * delay[band * 2] - a2 * delay[band * 2 + 1];
+				y = (float)(b0 * w + b1 * delay[band * 2] + b2 * delay[band * 2 + 1]);
+				
+				delay[band * 2 + 1] = delay[band * 2];
+				delay[band * 2] = (float)w;
+			}
+			
+			data[n * numChannels] = y;
+		}
+	}
+}
 
 static NSString *const kPrefEqualizerEnabled = @"ml_eq_enabled";
 static NSString *const kPrefEqualizerPresetId = @"ml_eq_preset_id";
@@ -33,6 +96,8 @@ typedef struct {
 	BOOL isFloat;
 	BOOL isInterleaved;
 	vDSP_biquad_Setup biquadSetup;
+	MLManualBiquadState manualBiquad; // iOS 6/7 fallback
+	BOOL useManualBiquad;
 	float delays[2][2 * ML_EQ_NUM_BANDS + 2];
 	float scopeBuffer[ML_EQ_SCOPE_SIZE];
 	uint32_t scopeWritePos;
@@ -74,7 +139,7 @@ static void tapInit(MTAudioProcessingTapRef tap, void *clientInfo, void **tapSto
 
 	storage->manager = clientInfo;
 	pthread_mutex_init(&storage->lock, NULL);
-	storage->sampleRate = 44100.0;
+	storage->sampleRate = 0.0; // Will be set in tapPrepare; 0 = not ready
 	storage->channels = 2;
 	storage->isFloat = YES;
 	storage->isInterleaved = NO;
@@ -168,11 +233,12 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 	// Use mutex lock to guarantee that coefficients and buffers are never skipped
 	pthread_mutex_lock(&storage->lock);
 
-	if (!storage->enabled || storage->allBandsFlat || !storage->biquadSetup) {
+	// If sampleRate not ready, or EQ disabled/flat, pass through
+	if (storage->sampleRate == 0.0 || !storage->enabled || storage->allBandsFlat || (!storage->useManualBiquad && !storage->biquadSetup)) {
 		static uint32_t sLogCounter = 0;
 		if ((sLogCounter++ % 150) == 0) {
-			NSLog(@"[MLEQ] tapProcess PASSTHROUGH: enabled=%d allFlat=%d biquadSetup=%p",
-			      storage->enabled, storage->allBandsFlat, storage->biquadSetup);
+			NSLog(@"[MLEQ] tapProcess PASSTHROUGH: manual=%d enabled=%d allFlat=%d biquadSetup=%p",
+			      storage->useManualBiquad, storage->enabled, storage->allBandsFlat, storage->biquadSetup);
 		}
 		// Pass-through: copy recent audio to scope buffer for visualizer even when EQ is off
 		if (storage->isFloat && bufferListInOut->mNumberBuffers > 0) {
@@ -209,17 +275,23 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 			if (numChannels > 2) numChannels = 2;
 			float *samples = (float *)bufferListInOut->mBuffers[0].mData;
 			if (samples) {
-				// 1. Vectorized Preamp Scaling (NEON)
+				// 1. Preamp Scaling
 				vDSP_Length totalSamples = frames * numChannels;
 				vDSP_vsmul(samples, 1, &preamp, samples, 1, totalSamples);
 
-				// 2. Vectorized 10-Band Cascaded Biquad Filtering (NEON)
-				vDSP_biquad(storage->biquadSetup, storage->delays[0], samples, numChannels, samples, numChannels, frames);
-				if (numChannels > 1) {
-					vDSP_biquad(storage->biquadSetup, storage->delays[1], samples + 1, numChannels, samples + 1, numChannels, frames);
+				// 2. 10-Band Cascaded Biquad Filtering
+				if (storage->useManualBiquad) {
+					// Manual biquad (iOS 6/7) - process in-place
+					MLManualBiquadProcessInPlace(&storage->manualBiquad, samples, numChannels, frames);
+				} else {
+					// vDSP (iOS 8+)
+					vDSP_biquad(storage->biquadSetup, storage->delays[0], samples, numChannels, samples, numChannels, frames);
+					if (numChannels > 1) {
+						vDSP_biquad(storage->biquadSetup, storage->delays[1], samples + 1, numChannels, samples + 1, numChannels, frames);
+					}
 				}
 
-				// 3. Vectorized Saturation Clamping (NEON)
+				// 3. Saturation Clamping
 				vDSP_vclip(samples, 1, &clipLow, &clipHigh, samples, 1, totalSamples);
 
 				// 4. Update Scope Buffer for UI Waveform Visualizer
@@ -237,13 +309,17 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 				float *samples = (float *)bufferListInOut->mBuffers[ch].mData;
 				if (!samples) continue;
 
-				// 1. Vectorized Preamp Scaling
+				// 1. Preamp Scaling
 				vDSP_vsmul(samples, 1, &preamp, samples, 1, frames);
 
-				// 2. Vectorized 10-Band Cascaded Biquad Filtering
-				vDSP_biquad(storage->biquadSetup, storage->delays[ch], samples, 1, samples, 1, frames);
+				// 2. 10-Band Cascaded Biquad Filtering
+				if (storage->useManualBiquad) {
+					MLManualBiquadProcessInPlace(&storage->manualBiquad, samples, 1, frames);
+				} else {
+					vDSP_biquad(storage->biquadSetup, storage->delays[ch], samples, 1, samples, 1, frames);
+				}
 
-				// 3. Vectorized Saturation Clamping
+				// 3. Saturation Clamping
 				vDSP_vclip(samples, 1, &clipLow, &clipHigh, samples, 1, frames);
 
 				if (ch == 0) {
@@ -274,16 +350,24 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 
 			if (storage->isInterleaved) {
 				uint32_t nc = storage->channels > 2 ? 2 : storage->channels;
-				vDSP_biquad(storage->biquadSetup, storage->delays[0], floatBuffer, nc, floatBuffer, nc, frames);
-				if (nc > 1) {
-					vDSP_biquad(storage->biquadSetup, storage->delays[1], floatBuffer + 1, nc, floatBuffer + 1, nc, frames);
+				if (storage->useManualBiquad) {
+					MLManualBiquadProcessInPlace(&storage->manualBiquad, floatBuffer, nc, frames);
+				} else {
+					vDSP_biquad(storage->biquadSetup, storage->delays[0], floatBuffer, nc, floatBuffer, nc, frames);
+					if (nc > 1) {
+						vDSP_biquad(storage->biquadSetup, storage->delays[1], floatBuffer + 1, nc, floatBuffer + 1, nc, frames);
+					}
 				}
 				NSUInteger copyCount = MIN((NSUInteger)frames, (NSUInteger)ML_EQ_SCOPE_SIZE);
 				for (NSUInteger k = 0; k < copyCount; k++) {
 					storage->scopeBuffer[k] = floatBuffer[k * nc];
 				}
 			} else {
-				vDSP_biquad(storage->biquadSetup, storage->delays[ch], floatBuffer, 1, floatBuffer, 1, frames);
+				if (storage->useManualBiquad) {
+					MLManualBiquadProcessInPlace(&storage->manualBiquad, floatBuffer, 1, frames);
+				} else {
+					vDSP_biquad(storage->biquadSetup, storage->delays[ch], floatBuffer, 1, floatBuffer, 1, frames);
+				}
 				if (ch == 0) {
 					NSUInteger copyCount = MIN((NSUInteger)frames, (NSUInteger)ML_EQ_SCOPE_SIZE);
 					memcpy(storage->scopeBuffer, floatBuffer, copyCount * sizeof(float));
@@ -604,12 +688,14 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 	[[NSUserDefaults standardUserDefaults] synchronize];
 }
 
-// MARK: - DSP Coefficients Calculation (Accelerate vDSP Biquad)
+// MARK: - DSP Coefficients Calculation (Accelerate vDSP Biquad + Manual Fallback)
 
 - (void)updateStorageCoefficients:(MLEqualizerTapStorage *)storage
 {
 	if (!storage) return;
 
+	BOOL vDSPAvailable = MLEnsureVDSPBiquadAvailable();
+	
 	pthread_mutex_lock(&storage->lock);
 	double sampleRate = storage->sampleRate > 8000.0 ? storage->sampleRate : 44100.0;
 	pthread_mutex_unlock(&storage->lock);
@@ -687,18 +773,28 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 		}
 	}
 
-	// Create new vectorized vDSP setup
-	vDSP_biquad_Setup newSetup = vDSP_biquad_CreateSetup(doubleCoeffs, ML_EQ_NUM_BANDS);
-
 	// Atomically swap all storage fields under storage mutex
 	pthread_mutex_lock(&storage->lock);
 	storage->enabled = currentEnabled;
 	storage->allBandsFlat = allFlat;
 	storage->preampGain = preampGain;
-	vDSP_biquad_Setup oldSetup = storage->biquadSetup;
-	storage->biquadSetup = newSetup;
-	if (oldSetup) {
-		vDSP_biquad_DestroySetup(oldSetup);
+	storage->useManualBiquad = !vDSPAvailable;
+	
+	if (vDSPAvailable) {
+		vDSP_biquad_Setup newSetup = vDSP_biquad_CreateSetup(doubleCoeffs, ML_EQ_NUM_BANDS);
+		vDSP_biquad_Setup oldSetup = storage->biquadSetup;
+		storage->biquadSetup = newSetup;
+		if (oldSetup) {
+			vDSP_biquad_DestroySetup(oldSetup);
+		}
+	} else {
+		// Initialize manual biquad state (iOS 6/7)
+		MLManualBiquadInit(&storage->manualBiquad, doubleCoeffs);
+		if (storage->biquadSetup) {
+			vDSP_biquad_DestroySetup(storage->biquadSetup);
+			storage->biquadSetup = NULL;
+		}
+		NSLog(@"[MLEQ] Using manual biquad fallback (iOS 6/7 compatible)");
 	}
 	pthread_mutex_unlock(&storage->lock);
 }
@@ -785,7 +881,7 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 		return;
 	}
 
-	if (!storage->enabled || storage->allBandsFlat || !storage->biquadSetup) {
+	if (!storage->enabled || storage->allBandsFlat || (!storage->useManualBiquad && !storage->biquadSetup)) {
 		// Pass-through: copy recent samples to scope buffer for UI visualizer
 		NSUInteger copyCount = MIN((NSUInteger)frames, (NSUInteger)ML_EQ_SCOPE_SIZE);
 		uint32_t nc = storage->channels > 0 ? storage->channels : 1;
@@ -802,16 +898,22 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 	uint32_t numChannels = storage->channels > 2 ? 2 : storage->channels;
 	vDSP_Length totalSamples = frames * numChannels;
 
-	// 1. Vectorized Preamp Scaling (NEON)
+	// 1. Preamp Scaling
 	vDSP_vsmul(samples, 1, &preamp, samples, 1, totalSamples);
 
-	// 2. Vectorized 10-Band Cascaded Biquad Filtering (NEON)
-	vDSP_biquad(storage->biquadSetup, storage->delays[0], samples, numChannels, samples, numChannels, frames);
-	if (numChannels > 1) {
-		vDSP_biquad(storage->biquadSetup, storage->delays[1], samples + 1, numChannels, samples + 1, numChannels, frames);
+	// 2. 10-Band Cascaded Biquad Filtering
+	if (storage->useManualBiquad) {
+		// Manual biquad (iOS 6/7)
+		MLManualBiquadProcessInPlace(&storage->manualBiquad, samples, numChannels, frames);
+	} else {
+		// vDSP (iOS 8+)
+		vDSP_biquad(storage->biquadSetup, storage->delays[0], samples, numChannels, samples, numChannels, frames);
+		if (numChannels > 1) {
+			vDSP_biquad(storage->biquadSetup, storage->delays[1], samples + 1, numChannels, samples + 1, numChannels, frames);
+		}
 	}
 
-	// 3. Vectorized Saturation Clamping (NEON)
+	// 3. Saturation Clamping
 	vDSP_vclip(samples, 1, &clipLow, &clipHigh, samples, 1, totalSamples);
 
 	// 4. Update Scope Buffer for UI Waveform Visualizer
@@ -822,7 +924,6 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 
 	pthread_mutex_unlock(&storage->lock);
 }
-
 // MARK: - AVPlayerItem Integration
 
 - (AVAssetTrack *)audioTrackFromPlayerItem:(AVPlayerItem *)playerItem
