@@ -415,7 +415,8 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 		[self setupPresets];
 
 		NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-		_enabled = [ud boolForKey:kPrefEqualizerEnabled];
+		BOOL isLegacy = ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f);
+		_enabled = isLegacy ? NO : [ud boolForKey:kPrefEqualizerEnabled];
 		_currentPresetId = [ud stringForKey:kPrefEqualizerPresetId] ?: @"flat";
 
 		NSArray *savedGains = [ud arrayForKey:kPrefEqualizerBandValues];
@@ -609,6 +610,10 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 
 - (void)setEnabled:(BOOL)enabled
 {
+	BOOL isLegacy = ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f);
+	if (isLegacy) {
+		enabled = NO;
+	}
 	if (_enabled == enabled) return;
 
 	[_lock lock];
@@ -956,6 +961,9 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 - (void)attachEqualizerToPlayerItem:(AVPlayerItem *)playerItem
 {
 	if (!playerItem) return;
+	if ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f) {
+		return;
+	}
 	if (&MTAudioProcessingTapCreate == NULL) {
 		NSLog(@"[MLEqualizer] MTAudioProcessingTapCreate not supported on this OS");
 		return;

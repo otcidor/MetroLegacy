@@ -291,7 +291,9 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 			s->_currentPlaybackURL = playbackURL;
 
 			AVPlayerItem *item = [AVPlayerItem playerItemWithURL:playbackURL];
-			[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:item];
+			if (!isLegacy) {
+				[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:item];
+			}
 			AVPlayer *p = [AVPlayer playerWithPlayerItem:item];
 			[s attachPlayer:p];
 			if (!isLegacy && resumeTime > 1.0) {
@@ -349,7 +351,9 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 			}
 			s->_currentPlaybackURL = playbackURL;
 			AVPlayerItem *item = [AVPlayerItem playerItemWithURL:playbackURL];
-			[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:item];
+			if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0f) {
+				[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:item];
+			}
 			AVPlayer *p = [AVPlayer playerWithPlayerItem:item];
 			[s attachPlayer:p];
 			if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0f && resumeTime > 1.0) {
@@ -398,7 +402,9 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 		}
 		self->_currentPlaybackURL = playbackURL;
 		AVPlayerItem *item = [AVPlayerItem playerItemWithURL:playbackURL];
-		[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:item];
+		if (!isLegacy) {
+			[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:item];
+		}
 		AVPlayer *p = [AVPlayer playerWithPlayerItem:item];
 		[self attachPlayer:p];
 		if (!isLegacy && resumeTime > 1.0) {
@@ -543,7 +549,7 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 				self->_retryCount = 0;
 				self.statusError = nil;
 				self.buffering = NO;
-				if (observed.audioMix == nil) {
+				if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0f && observed.audioMix == nil) {
 					[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:observed];
 				}
 				if (self.playing) {
@@ -566,7 +572,9 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 					self->_currentPlaybackURL = self->_currentRawStreamURL;
 					CGFloat resumeAt = self->_lastKnownTime;
 					AVPlayerItem *directItem = [AVPlayerItem playerItemWithURL:self->_currentRawStreamURL];
-					[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:directItem];
+					if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0f) {
+						[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:directItem];
+					}
 					AVPlayer *directPlayer = [AVPlayer playerWithPlayerItem:directItem];
 					[self attachPlayer:directPlayer];
 					if (resumeAt > 1.0) {
@@ -716,7 +724,6 @@ NSString *const MLPlaybackQueueStartedNotification = @"MLPlaybackQueueStartedNot
 			_observedItem = nil;
 		}
 		AVPlayerItem *newItem = [AVPlayerItem playerItemWithURL:seekURL];
-		[[MLEqualizerManager sharedManager] attachEqualizerToPlayerItem:newItem];
 		[_player replaceCurrentItemWithPlayerItem:newItem];
 		_observedItem = newItem;
 		[newItem addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew context:NULL];

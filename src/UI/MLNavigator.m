@@ -427,21 +427,23 @@ static const char *const MLSongMenuActionTargetKey = "ml.songmenu.target";
 		[handler presentSleepTimerPicker];
 	}]];
 
-	// Equalizer
-	[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"equalizer_title", nil) iconName:@"equalizer" handler:^{
-		dispatch_async(dispatch_get_main_queue(), ^{
-			MLEqualizerViewController *eqVC = [[MLEqualizerViewController alloc] init];
-			if (vc.navigationController) {
-				[vc.navigationController pushViewController:eqVC animated:YES];
-			} else {
-				UIViewController *presenter = vc;
-				while (presenter.presentedViewController && !presenter.presentedViewController.isBeingDismissed) {
-					presenter = presenter.presentedViewController;
+	// Equalizer (iOS 7+)
+	if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0f) {
+		[items addObject:[MLBottomSheetItem itemWithTitle:MLLocalizedString(@"equalizer_title", nil) iconName:@"equalizer" handler:^{
+			dispatch_async(dispatch_get_main_queue(), ^{
+				MLEqualizerViewController *eqVC = [[MLEqualizerViewController alloc] init];
+				if (vc.navigationController) {
+					[vc.navigationController pushViewController:eqVC animated:YES];
+				} else {
+					UIViewController *presenter = vc;
+					while (presenter.presentedViewController && !presenter.presentedViewController.isBeingDismissed) {
+						presenter = presenter.presentedViewController;
+					}
+					[presenter presentViewController:eqVC animated:YES completion:nil];
 				}
-				[presenter presentViewController:eqVC animated:YES completion:nil];
-			}
-		});
-	}]];
+			});
+		}]];
+	}
 
 	NSString *subtitle = item.artists.count ? [item.artists componentsJoinedByString:@", "] : (item.subtitle ?: @"");
 	MLBottomSheetMenu *menu = [MLBottomSheetMenu menuWithTitle:item.title subtitle:subtitle items:items];

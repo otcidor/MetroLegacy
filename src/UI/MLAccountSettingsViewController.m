@@ -748,16 +748,19 @@
 		@"isSwitch" : @YES,
 		@"switchValue" : @(sbEnabled),
 	}];
-	BOOL eqEnabled = [MLEqualizerManager sharedManager].enabled;
-	NSString *eqPresetName = [[MLEqualizerManager sharedManager] currentPresetLocalizedName];
-	NSString *eqSub = eqEnabled ? eqPresetName : MLLocalizedString(@"disabled", nil);
-	[list addObject:@{
-		@"type" : @"equalizer",
-		@"title" : MLLocalizedString(@"equalizer_title", nil),
-		@"subtitle" : eqSub,
-		@"icon" : @"equalizer",
-		@"color" : [UIColor colorWithRed:0.95f green:0.60f blue:0.15f alpha:1.0f],
-	}];
+	BOOL isLegacy = ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f);
+	if (!isLegacy) {
+		BOOL eqEnabled = [MLEqualizerManager sharedManager].enabled;
+		NSString *eqPresetName = [[MLEqualizerManager sharedManager] currentPresetLocalizedName];
+		NSString *eqSub = eqEnabled ? eqPresetName : MLLocalizedString(@"disabled", nil);
+		[list addObject:@{
+			@"type" : @"equalizer",
+			@"title" : MLLocalizedString(@"equalizer_title", nil),
+			@"subtitle" : eqSub,
+			@"icon" : @"equalizer",
+			@"color" : [UIColor colorWithRed:0.95f green:0.60f blue:0.15f alpha:1.0f],
+		}];
+	}
 
 	// Group 3: Theme & Appearance
 	[list addObject:@{ @"type" : @"section_header", @"title" : MLLocalizedString(@"theme_section", nil) }];

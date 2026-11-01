@@ -240,11 +240,15 @@ static CGPathRef MLCreateRoundedRectPath(CGRect rect, CGFloat tl, CGFloat tr, CG
 	[_closeButton addTarget:self action:@selector(closeTap:) forControlEvents:UIControlEventTouchUpInside];
 	[self.view addSubview:_closeButton];
 
-	// Equalizer Button (Top Right Header)
+	// Equalizer Button (Top Right Header - iOS 7+)
+	BOOL isLegacy = ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0f);
 	_eqButton = [UIButton buttonWithType:UIButtonTypeCustom];
 	[_eqButton setImage:[MLIcon icon:@"equalizer" size:24.0f color:[MLTheme onSurface]] forState:UIControlStateNormal];
 	[_eqButton addTarget:self action:@selector(eqTap:) forControlEvents:UIControlEventTouchUpInside];
-	[self.view addSubview:_eqButton];
+	_eqButton.hidden = isLegacy;
+	if (!isLegacy) {
+		[self.view addSubview:_eqButton];
+	}
 
 	// Header Subtitle: "NOW PLAYING"
 	_headerSubtitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -526,7 +530,9 @@ static CGPathRef MLCreateRoundedRectPath(CGRect rect, CGFloat tl, CGFloat tr, CG
 	CGFloat topY = topInset + (isCompact ? 4.0f : 10.0f);
 	CGFloat closeBtnSize = isCompact ? 34.0f : 38.0f;
 	_closeButton.frame = CGRectMake(14.0f, topY, closeBtnSize, closeBtnSize);
-	_eqButton.frame = CGRectMake(W - 14.0f - closeBtnSize, topY, closeBtnSize, closeBtnSize);
+	if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0f) {
+		_eqButton.frame = CGRectMake(W - 14.0f - closeBtnSize, topY, closeBtnSize, closeBtnSize);
+	}
 
 	CGFloat headerTextW = W - (14.0f + closeBtnSize + 8.0f) * 2.0f;
 	_headerSubtitleLabel.frame = CGRectMake((W - headerTextW) / 2.0f, topY + 2.0f, headerTextW, 14.0f);
