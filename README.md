@@ -14,7 +14,7 @@
   <a href="https://github.com/MetrolistGroup/Metrolist"><img src="https://img.shields.io/badge/Inspired%20by-Metrolist%20Android-ED5564.svg" alt="Metrolist"></a>
   <img src="https://img.shields.io/badge/Target-iOS%206.0%2B-blue.svg" alt="iOS 6.0+">
   <img src="https://img.shields.io/badge/Arch-armv7%20%7C%20arm64-green.svg" alt="Architectures">
-  <img src="https://img.shields.io/badge/Version-1.2.5-orange.svg" alt="Version 1.2.5">
+  <img src="https://img.shields.io/badge/Version-1.2.6-orange.svg" alt="Version 1.2.6">
   <img src="https://img.shields.io/badge/License-GPLv3-lightgrey.svg" alt="GPLv3">
 </p>
 
@@ -38,7 +38,7 @@ It communicates directly with YouTube Music's internal InnerTube REST API (`musi
 - **Robust DASH Fragment Delivery:**
   - Automatically handles upstream HTTP 416 Range Unsatisfiable responses with open-ended range queries (`bytes=start-`) to retrieve final audio fragments cleanly.
   - Calculates exact physical audio durations from SIDX boxes (`durationForStreamURL:`), preventing duration mismatches between video metadata and physical audio streams.
-  - Detects stream completion and serves clean HTTP 200 EOF (`Content-Length: 0`) on subsequent reconnection requests, preventing track looping or unexpected restarts at the end of songs.
+  - Producer-consumer progressive ADTS cache with HTTP 206 Range request support and ADTS frame-aligned byte offsets, ensuring uninterrupted playback to the end of all tracks without socket truncation or premature EOF cutoffs.
 - **Precision Seeking:** Instant seeking on iOS 6 through the `?startSec=` parameter, which resolves the exact SIDX segment offset and streams immediately without AVPlayer buffering stalls.
 
 ### Material 3 User Interface

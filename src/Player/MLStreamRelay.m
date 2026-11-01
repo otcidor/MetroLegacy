@@ -489,6 +489,10 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	NSMutableDictionary *_durationMap;
 	NSMutableDictionary *_finishedMap;
 	NSMutableDictionary *_highestSegMap;
+	NSMutableDictionary *_adtsDataMap;
+	NSMutableDictionary *_adtsSegOffsetMap;
+	NSMutableDictionary *_adtsDoneMap;
+	NSMutableDictionary *_adtsBusyMap;
 	NSLock *_lock;
 	NSUInteger _generation;
 	NSUInteger _listenerId;
@@ -524,6 +528,10 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 		_durationMap = [[NSMutableDictionary alloc] init];
 		_finishedMap = [[NSMutableDictionary alloc] init];
 		_highestSegMap = [[NSMutableDictionary alloc] init];
+		_adtsDataMap = [[NSMutableDictionary alloc] init];
+		_adtsSegOffsetMap = [[NSMutableDictionary alloc] init];
+		_adtsDoneMap = [[NSMutableDictionary alloc] init];
+		_adtsBusyMap = [[NSMutableDictionary alloc] init];
 		_acceptQueue = dispatch_queue_create("win.otcidor.MLStreamRelay.accept", DISPATCH_QUEUE_CONCURRENT);
 		_workerQueue = dispatch_queue_create("win.otcidor.MLStreamRelay.worker", DISPATCH_QUEUE_CONCURRENT);
 
@@ -692,6 +700,11 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	[_timescaleMap removeAllObjects];
 	[_durationMap removeAllObjects];
 	[_finishedMap removeAllObjects];
+	[_highestSegMap removeAllObjects];
+	[_adtsDataMap removeAllObjects];
+	[_adtsSegOffsetMap removeAllObjects];
+	[_adtsDoneMap removeAllObjects];
+	[_adtsBusyMap removeAllObjects];
 	[_lock unlock];
 }
 
@@ -716,6 +729,10 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	_urlMap[streamId] = remoteStreamURL;
 	[_finishedMap removeObjectForKey:streamId];
 	[_highestSegMap removeObjectForKey:streamId];
+	[_adtsDataMap removeObjectForKey:streamId];
+	[_adtsSegOffsetMap removeObjectForKey:streamId];
+	[_adtsDoneMap removeObjectForKey:streamId];
+	[_adtsBusyMap removeObjectForKey:streamId];
 
 	// For local downloaded or cached files, pre-populate total length from file attributes
 	if (remoteStreamURL.isFileURL) {
@@ -743,6 +760,19 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 			[_durationMap removeObjectForKey:oldKey];
 			[_finishedMap removeObjectForKey:oldKey];
 			[_highestSegMap removeObjectForKey:oldKey];
+			[_adtsDataMap removeObjectForKey:oldKey];
+			[_adtsSegOffsetMap removeObjectForKey:oldKey];
+			[_adtsDoneMap removeObjectForKey:oldKey];
+			[_adtsBusyMap removeObjectForKey:oldKey];
+		}
+		for (NSString *key in _adtsDataMap.allKeys) {
+			NSUInteger keyGen = (NSUInteger)[key integerValue];
+			if (keyGen + 2 < _generation) {
+				[_adtsDataMap removeObjectForKey:key];
+				[_adtsSegOffsetMap removeObjectForKey:key];
+				[_adtsDoneMap removeObjectForKey:key];
+				[_adtsBusyMap removeObjectForKey:key];
+			}
 		}
 	}
 	[_lock unlock];
@@ -776,6 +806,10 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	_urlMap[streamId] = remoteStreamURL;
 	[_finishedMap removeObjectForKey:streamId];
 	[_highestSegMap removeObjectForKey:streamId];
+	[_adtsDataMap removeObjectForKey:streamId];
+	[_adtsSegOffsetMap removeObjectForKey:streamId];
+	[_adtsDoneMap removeObjectForKey:streamId];
+	[_adtsBusyMap removeObjectForKey:streamId];
 
 	if (remoteStreamURL.isFileURL) {
 		NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:[remoteStreamURL path] error:nil];
@@ -800,6 +834,19 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 			[_timescaleMap removeObjectForKey:oldKey];
 			[_finishedMap removeObjectForKey:oldKey];
 			[_highestSegMap removeObjectForKey:oldKey];
+			[_adtsDataMap removeObjectForKey:oldKey];
+			[_adtsSegOffsetMap removeObjectForKey:oldKey];
+			[_adtsDoneMap removeObjectForKey:oldKey];
+			[_adtsBusyMap removeObjectForKey:oldKey];
+		}
+		for (NSString *key in _adtsDataMap.allKeys) {
+			NSUInteger keyGen = (NSUInteger)[key integerValue];
+			if (keyGen + 2 < _generation) {
+				[_adtsDataMap removeObjectForKey:key];
+				[_adtsSegOffsetMap removeObjectForKey:key];
+				[_adtsDoneMap removeObjectForKey:key];
+				[_adtsBusyMap removeObjectForKey:key];
+			}
 		}
 	}
 	[_lock unlock];
@@ -965,6 +1012,97 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 		*outResp = lastResp;
 	}
 	return nil;
+}
+
+- (void)startAdtsProducerForStreamId:(NSString *)streamId
+                           remoteURL:(NSURL *)remoteURL
+                            segments:(NSArray *)segments
+                           timescale:(uint32_t)timescale
+{
+	if (!streamId || !remoteURL || !segments.count) return;
+
+	[_lock lock];
+	BOOL busy = [_adtsBusyMap[streamId] boolValue];
+	BOOL done = [_adtsDoneMap[streamId] boolValue];
+	if (!busy && !done) {
+		_adtsBusyMap[streamId] = @YES;
+		if (!_adtsDataMap[streamId]) {
+			_adtsDataMap[streamId] = [[NSMutableData alloc] init];
+		}
+		if (!_adtsSegOffsetMap[streamId]) {
+			_adtsSegOffsetMap[streamId] = [[NSMutableArray alloc] init];
+		}
+	}
+	[_lock unlock];
+
+	if (busy || done) {
+		return;
+	}
+
+	NSLog(@"[MLStreamRelay] Starting ADTS producer for stream %@ (%lu segments)", streamId, (unsigned long)segments.count);
+
+	__weak MLStreamRelay *wself = self;
+	dispatch_async(_workerQueue, ^{
+		for (NSUInteger i = 0; i < segments.count; i++) {
+			MLStreamRelay *strongSelf = wself;
+			if (!strongSelf) return;
+
+			[strongSelf->_lock lock];
+			BOOL stillExists = (strongSelf->_urlMap[streamId] != nil);
+			[strongSelf->_lock unlock];
+			if (!stillExists) {
+				NSLog(@"[MLStreamRelay] Stream %@ evicted during ADTS download, stopping producer", streamId);
+				break;
+			}
+
+			MLSidxSegment *targetSeg = segments[i];
+			NSHTTPURLResponse *httpResp = nil;
+			NSData *rawFragData = nil;
+			for (int attempt = 0; attempt < 3; attempt++) {
+				rawFragData = [strongSelf fetchRangeStart:targetSeg.startOffset
+				                                      end:targetSeg.endOffset
+				                                  fromURL:remoteURL
+				                             httpResponse:&httpResp];
+				if (rawFragData.length > 0) {
+					break;
+				}
+				usleep(200000); // 200ms
+			}
+
+			if (!rawFragData.length) {
+				NSLog(@"[MLStreamRelay] Producer: Failed to fetch segment %lu for stream %@", (unsigned long)i, streamId);
+				continue;
+			}
+
+			NSData *adts = MLExtractAdtsFromMp4Fragment(rawFragData, timescale, 2);
+			if (!adts.length) {
+				NSLog(@"[MLStreamRelay] Producer: Failed to extract ADTS from segment %lu for stream %@", (unsigned long)i, streamId);
+				continue;
+			}
+
+			[strongSelf->_lock lock];
+			NSMutableData *buf = strongSelf->_adtsDataMap[streamId];
+			NSMutableArray *offsets = strongSelf->_adtsSegOffsetMap[streamId];
+			if (buf && offsets) {
+				NSUInteger currentOffset = buf.length;
+				[offsets addObject:@(currentOffset)];
+				[buf appendData:adts];
+			}
+			[strongSelf->_lock unlock];
+		}
+
+		MLStreamRelay *strongSelf = wself;
+		if (strongSelf) {
+			[strongSelf->_lock lock];
+			strongSelf->_adtsDoneMap[streamId] = @YES;
+			strongSelf->_adtsBusyMap[streamId] = @NO;
+			strongSelf->_finishedMap[streamId] = @YES;
+			NSUInteger finalBytes = [strongSelf->_adtsDataMap[streamId] length];
+			[strongSelf->_lock unlock];
+			NSLog(@"[MLStreamRelay] Stream %@ ADTS producer completed (%lu segments, %lu total bytes)",
+			      streamId, (unsigned long)segments.count, (unsigned long)finalBytes);
+		}
+	});
 }
 
 - (void)handleClient:(int)clientFD
@@ -1215,31 +1353,25 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 			hasStartSec = YES;
 		}
 
-		BOOL isAlreadyFinished = NO;
-		[_lock lock];
-		isAlreadyFinished = [_finishedMap[streamId] boolValue];
-		[_lock unlock];
-
-		if (!hasStartSec && isAlreadyFinished) {
-			NSLog(@"[MLStreamRelay] Stream %@ already completed. Serving EOF to prevent looping.", streamId);
-			NSString *eofHdr = @"HTTP/1.1 200 OK\r\n"
-			                    @"Content-Type: audio/aac\r\n"
-			                    @"Content-Length: 0\r\n"
-			                    @"Connection: close\r\n\r\n";
-			NSData *eofData = [eofHdr dataUsingEncoding:NSASCIIStringEncoding];
-			MLWriteAll(clientFD, eofData.bytes, eofData.length);
-			shutdown(clientFD, SHUT_WR);
-			char drainBuf[256];
-			while (read(clientFD, drainBuf, sizeof(drainBuf)) > 0) {}
-			close(clientFD);
-			return;
-		}
-
-		if (hasStartSec) {
-			[_lock lock];
-			[_finishedMap removeObjectForKey:streamId];
-			[_highestSegMap removeObjectForKey:streamId];
-			[_lock unlock];
+		long long rangeStart = 0;
+		long long rangeEnd = -1;
+		BOOL hasRange = NO;
+		for (NSString *line in lines) {
+			if ([line hasPrefix:@"Range:"] || [line hasPrefix:@"range:"]) {
+				NSRange bytesRange = [line rangeOfString:@"bytes="];
+				if (bytesRange.location != NSNotFound) {
+					NSString *val = [line substringFromIndex:bytesRange.location + bytesRange.length];
+					NSArray *rngParts = [val componentsSeparatedByString:@"-"];
+					if (rngParts.count > 0 && [rngParts[0] length]) {
+						rangeStart = [rngParts[0] longLongValue];
+						hasRange = YES;
+					}
+					if (rngParts.count > 1 && [rngParts[1] length]) {
+						rangeEnd = [rngParts[1] longLongValue];
+					}
+				}
+				break;
+			}
 		}
 
 		NSArray *segments = nil;
@@ -1298,23 +1430,113 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 			return;
 		}
 
-		NSUInteger startSegIndex = 0;
-		if (startSec > 0.0) {
-			double accTime = 0.0;
+		// Ensure background producer is downloading and demuxing ADTS
+		[self startAdtsProducerForStreamId:streamId remoteURL:remoteURL segments:segments timescale:timescale];
+
+		// Calculate startByte
+		NSUInteger startByte = 0;
+		if (hasRange && rangeStart > 0) {
+			startByte = (NSUInteger)rangeStart;
+		} else if (hasStartSec && startSec > 0.0) {
+			NSUInteger targetSegIdx = 0;
+			double acc = 0.0;
 			for (NSUInteger i = 0; i < segments.count; i++) {
-				MLSidxSegment *seg = segments[i];
-				if (accTime + seg.duration > startSec) {
-					startSegIndex = i;
+				MLSidxSegment *s = segments[i];
+				if (acc + s.duration > startSec) {
+					targetSegIdx = i;
 					break;
 				}
-				accTime += seg.duration;
+				acc += s.duration;
+			}
+			// Wait if needed for producer to reach targetSegIdx
+			int waitAttempts = 0;
+			while (waitAttempts < 60) {
+				[_lock lock];
+				NSArray *offsets = _adtsSegOffsetMap[streamId];
+				BOOL isDone = [_adtsDoneMap[streamId] boolValue];
+				if (offsets.count > targetSegIdx) {
+					startByte = [offsets[targetSegIdx] unsignedIntegerValue];
+					[_lock unlock];
+					break;
+				}
+				if (isDone) {
+					if (offsets.count > 0) {
+						startByte = [offsets.lastObject unsignedIntegerValue];
+					}
+					[_lock unlock];
+					break;
+				}
+				[_lock unlock];
+				usleep(50000);
+				waitAttempts++;
+			}
+			NSLog(@"[MLStreamRelay] Seek to %.2fs for stream %@ resolved to segment %lu (offset %lu)",
+			      startSec, streamId, (unsigned long)targetSegIdx, (unsigned long)startByte);
+		}
+
+		BOOL isProducerDone = NO;
+		NSUInteger totalKnownLen = 0;
+		[_lock lock];
+		isProducerDone = [_adtsDoneMap[streamId] boolValue];
+		totalKnownLen = [_adtsDataMap[streamId] length];
+		[_lock unlock];
+
+		NSString *respHdr = nil;
+		if (hasRange) {
+			if (isProducerDone && totalKnownLen > 0) {
+				long long finalEnd = (rangeEnd >= 0 && rangeEnd < (long long)totalKnownLen) ? rangeEnd : (long long)(totalKnownLen - 1);
+				long long contentLength = (finalEnd >= rangeStart) ? (finalEnd - rangeStart + 1) : 0;
+				respHdr = [NSString stringWithFormat:
+					@"HTTP/1.1 206 Partial Content\r\n"
+					@"Content-Type: audio/aac\r\n"
+					@"Content-Range: bytes %lld-%lld/%lu\r\n"
+					@"Content-Length: %lld\r\n"
+					@"Accept-Ranges: bytes\r\n"
+					@"Connection: close\r\n\r\n",
+					rangeStart, finalEnd, (unsigned long)totalKnownLen, contentLength];
+			} else {
+				if (rangeEnd >= rangeStart) {
+					long long clen = rangeEnd - rangeStart + 1;
+					respHdr = [NSString stringWithFormat:
+						@"HTTP/1.1 206 Partial Content\r\n"
+						@"Content-Type: audio/aac\r\n"
+						@"Content-Range: bytes %lld-%lld/*\r\n"
+						@"Content-Length: %lld\r\n"
+						@"Accept-Ranges: bytes\r\n"
+						@"Connection: close\r\n\r\n",
+						rangeStart, rangeEnd, clen];
+				} else {
+					respHdr = @"HTTP/1.1 206 Partial Content\r\n"
+					          @"Content-Type: audio/aac\r\n"
+					          @"Accept-Ranges: bytes\r\n"
+					          @"Connection: close\r\n\r\n";
+				}
+			}
+		} else {
+			if (isProducerDone && totalKnownLen > 0 && startByte == 0) {
+				respHdr = [NSString stringWithFormat:
+					@"HTTP/1.1 200 OK\r\n"
+					@"Content-Type: audio/aac\r\n"
+					@"Content-Length: %lu\r\n"
+					@"Accept-Ranges: bytes\r\n"
+					@"Connection: close\r\n\r\n",
+					(unsigned long)totalKnownLen];
+			} else if (isProducerDone && totalKnownLen > startByte) {
+				respHdr = [NSString stringWithFormat:
+					@"HTTP/1.1 200 OK\r\n"
+					@"Content-Type: audio/aac\r\n"
+					@"Content-Length: %lu\r\n"
+					@"Accept-Ranges: bytes\r\n"
+					@"Connection: close\r\n\r\n",
+					(unsigned long)(totalKnownLen - startByte)];
+			} else {
+				respHdr = @"HTTP/1.1 200 OK\r\n"
+				          @"Content-Type: audio/aac\r\n"
+				          @"Accept-Ranges: bytes\r\n"
+				          @"Connection: close\r\n\r\n";
 			}
 		}
 
-		NSString *respHdr = @"HTTP/1.1 200 OK\r\n"
-		                    @"Content-Type: audio/aac\r\n"
-		                    @"Accept-Ranges: none\r\n"
-		                    @"Connection: close\r\n\r\n";
 		NSData *hdrData = [respHdr dataUsingEncoding:NSASCIIStringEncoding];
 		if (!MLWriteAll(clientFD, hdrData.bytes, hdrData.length)) {
 			close(clientFD);
@@ -1325,60 +1547,84 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 			return;
 		}
 
-		NSLog(@"[MLStreamRelay] Streaming progressive ADTS AAC for %@ (startSeg=%lu/%lu, startSec=%.2f)",
-		      streamId, (unsigned long)startSegIndex, (unsigned long)segments.count, startSec);
+		NSLog(@"[MLStreamRelay] Streaming ADTS AAC for %@ (startByte=%lu, rangeStart=%lld, rangeEnd=%lld, startSec=%.2f)",
+		      streamId, (unsigned long)startByte, rangeStart, rangeEnd, startSec);
 
-		BOOL successfullyFinished = NO;
-		for (NSUInteger i = startSegIndex; i < segments.count; i++) {
-			MLSidxSegment *targetSeg = segments[i];
-			NSHTTPURLResponse *httpResp = nil;
-			NSData *rawFragData = nil;
-			for (int fragAttempt = 0; fragAttempt < 3; fragAttempt++) {
-				rawFragData = [self fetchRangeStart:targetSeg.startOffset
-				                                end:targetSeg.endOffset
-				                            fromURL:remoteURL
-				                       httpResponse:&httpResp];
-				if (rawFragData.length > 0) {
-					break;
-				}
-				usleep(250000);
-			}
-			if (!rawFragData.length) {
-				NSLog(@"[MLStreamRelay] Failed to fetch fragment %lu after 3 attempts for AAC stream %@", (unsigned long)i, streamId);
-				break;
-			}
-
-			NSData *adtsData = MLExtractAdtsFromMp4Fragment(rawFragData, timescale, 2);
-			if (!adtsData.length) {
-				NSLog(@"[MLStreamRelay] Failed to extract ADTS from fragment %lu for AAC stream %@", (unsigned long)i, streamId);
-				break;
-			}
-
-			if (!MLWriteAll(clientFD, adtsData.bytes, adtsData.length)) {
-				// Client closed connection (e.g. paused, skipped, or seeked)
-				break;
-			}
+		NSUInteger curOffset = startByte;
+		int idleCount = 0;
+		while (YES) {
+			NSData *chunk = nil;
+			BOOL finished = NO;
 
 			[_lock lock];
-			_highestSegMap[streamId] = @(i);
+			NSMutableData *buf = _adtsDataMap[streamId];
+			BOOL isDone = [_adtsDoneMap[streamId] boolValue];
+			if (buf && curOffset < buf.length) {
+				NSUInteger avail = buf.length - curOffset;
+				NSUInteger toSend = MIN(avail, (NSUInteger)65536);
+				if (rangeEnd >= 0 && curOffset + toSend > (NSUInteger)rangeEnd + 1) {
+					toSend = (NSUInteger)rangeEnd + 1 - curOffset;
+				}
+				chunk = [buf subdataWithRange:NSMakeRange(curOffset, toSend)];
+				curOffset += toSend;
+				if (rangeEnd >= 0 && curOffset > (NSUInteger)rangeEnd) {
+					finished = YES;
+				}
+			} else if (isDone) {
+				finished = YES;
+			}
 			[_lock unlock];
 
-			if (i == segments.count - 1) {
-				successfullyFinished = YES;
+			if (chunk.length > 0) {
+				idleCount = 0;
+				if (!MLWriteAll(clientFD, chunk.bytes, chunk.length)) {
+					// Client closed connection (e.g. paused, skipped, or seeked)
+					break;
+				}
+			}
+			if (finished) {
+				break;
+			}
+			if (!chunk.length) {
+				idleCount++;
+				if (idleCount > 400) { // 400 * 25ms = 10s timeout
+					NSLog(@"[MLStreamRelay] Consumer timed out waiting for producer data for stream %@", streamId);
+					break;
+				}
+				usleep(25000); // 25ms
 			}
 		}
 
-		[_lock lock];
-		NSNumber *highestNum = _highestSegMap[streamId];
-		if (successfullyFinished || (highestNum && [highestNum unsignedIntegerValue] + 1 >= segments.count)) {
-			_finishedMap[streamId] = @YES;
-			NSLog(@"[MLStreamRelay] Stream %@ successfully marked finished (%lu segments)", streamId, (unsigned long)segments.count);
-		}
-		[_lock unlock];
+		if (rangeEnd < 0) {
+			// Progressive playback connection: keep socket open so AVPlayer can play & drain buffer to completion
+			while (YES) {
+				[_lock lock];
+				BOOL stillCurrent = (_urlMap[streamId] != nil);
+				[_lock unlock];
+				if (!stillCurrent) break;
 
-		shutdown(clientFD, SHUT_WR);
-		char drainBuf[256];
-		while (read(clientFD, drainBuf, sizeof(drainBuf)) > 0) {}
+				fd_set rset;
+				FD_ZERO(&rset);
+				FD_SET(clientFD, &rset);
+				struct timeval tv;
+				tv.tv_sec = 2;
+				tv.tv_usec = 0;
+				int sel = select(clientFD + 1, &rset, NULL, NULL, &tv);
+				if (sel < 0) {
+					if (errno == EINTR) continue;
+					break;
+				}
+				if (sel > 0) {
+					char drainBuf[128];
+					ssize_t r = read(clientFD, drainBuf, sizeof(drainBuf));
+					if (r <= 0) {
+						// Client finished playing/reading and closed socket
+						break;
+					}
+				}
+			}
+		}
+
 		close(clientFD);
 		return;
 	}
@@ -1535,7 +1781,7 @@ static NSData *MLMuxMp4FragmentToTs(NSData *fragData, uint64_t startPts, uint32_
 	}
 	if (!streamId) return NO;
 	[_lock lock];
-	BOOL fin = [_finishedMap[streamId] boolValue];
+	BOOL fin = [_adtsDoneMap[streamId] boolValue] || [_finishedMap[streamId] boolValue];
 	[_lock unlock];
 	return fin;
 }
