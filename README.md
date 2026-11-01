@@ -14,7 +14,7 @@
   <a href="https://github.com/MetrolistGroup/Metrolist"><img src="https://img.shields.io/badge/Inspired%20by-Metrolist%20Android-ED5564.svg" alt="Metrolist"></a>
   <img src="https://img.shields.io/badge/Target-iOS%206.0%2B-blue.svg" alt="iOS 6.0+">
   <img src="https://img.shields.io/badge/Arch-armv7%20%7C%20arm64-green.svg" alt="Architectures">
-  <img src="https://img.shields.io/badge/Version-1.2.3-orange.svg" alt="Version 1.2.3">
+  <img src="https://img.shields.io/badge/Version-1.2.4-orange.svg" alt="Version 1.2.4">
   <img src="https://img.shields.io/badge/License-GPLv3-lightgrey.svg" alt="GPLv3">
 </p>
 

@@ -120,6 +120,7 @@ typedef struct {
 	float _bandGains[ML_EQ_NUM_BANDS];
 	NSRecursiveLock *_lock;
 	NSMutableSet *_activeStorages; // set of [NSValue valueWithPointer:storage]
+	NSMutableArray *_activeTaps;
 	NSArray *_presetList;
 	MLEqualizerTapStorage _coreAudioStorage;
 }
@@ -155,6 +156,7 @@ static void tapInit(MTAudioProcessingTapRef tap, void *clientInfo, void **tapSto
 
 static void tapFinalize(MTAudioProcessingTapRef tap)
 {
+	NSLog(@"[MLEQ] tapFinalize called for tap=%p", tap);
 	MLEqualizerTapStorage *storage = (MLEqualizerTapStorage *)MTAudioProcessingTapGetStorage(tap);
 	if (storage) {
 		MLEqualizerManager *mgr = (__bridge MLEqualizerManager *)storage->manager;
@@ -185,7 +187,7 @@ static void tapPrepare(MTAudioProcessingTapRef tap, CMItemCount maxFrames, const
 	memset(storage->delays, 0, sizeof(storage->delays));
 	pthread_mutex_unlock(&storage->lock);
 
-	NSLog(@"[MLEQ] tapPrepare: sampleRate=%.0f, channels=%u, formatID=0x%X, formatFlags=0x%X, bitsPerChan=%u, bytesPerFrame=%u",
+	NSLog(@"[MLEQ] tapPrepare CALLED! sampleRate=%.0f, channels=%u, formatID=0x%X, formatFlags=0x%X, bitsPerChan=%u, bytesPerFrame=%u",
 	      storage->sampleRate, storage->channels, (unsigned int)processingFormat->mFormatID,
 	      (unsigned int)processingFormat->mFormatFlags, (unsigned int)processingFormat->mBitsPerChannel,
 	      (unsigned int)processingFormat->mBytesPerFrame);
@@ -408,6 +410,7 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 	if (self) {
 		_lock = [[NSRecursiveLock alloc] init];
 		_activeStorages = [[NSMutableSet alloc] init];
+		_activeTaps = [[NSMutableArray alloc] init];
 
 		[self setupPresets];
 
@@ -984,12 +987,6 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 	      (unsigned long)[[playerItem.asset tracksWithMediaType:AVMediaTypeAudio] count],
 	      (long)playerItem.status);
 
-	if (playerItem.status != AVPlayerItemStatusReadyToPlay && playerItem.tracks.count == 0) {
-		NSLog(@"[MLEQ] Postponing attachEqualizer until playerItem is ReadyToPlay (status=%ld, tracks=%lu)",
-		      (long)playerItem.status, (unsigned long)playerItem.tracks.count);
-		return;
-	}
-
 	MTAudioProcessingTapCallbacks callbacks;
 	callbacks.version = kMTAudioProcessingTapCallbacksVersion_0;
 	callbacks.clientInfo = (__bridge void *)self;
@@ -1011,33 +1008,45 @@ static void tapProcess(MTAudioProcessingTapRef tap,
 		AVMutableAudioMixInputParameters *params = [AVMutableAudioMixInputParameters audioMixInputParametersWithTrack:track];
 		params.audioTapProcessor = tap;
 		[inputParamsArray addObject:params];
-		NSLog(@"[MLEQ] Successfully attached 10-band vDSP audio tap processor to track (%d)", (int)track.trackID);
-	} else {
-		// No AVAssetTrack found (e.g. elemental ADTS stream).
-		// Use empty audioMixInputParameters with default and invalid trackIDs
-		AVMutableAudioMixInputParameters *p1 = [AVMutableAudioMixInputParameters audioMixInputParameters];
-		p1.trackID = 1;
-		p1.audioTapProcessor = tap;
-		[inputParamsArray addObject:p1];
+		NSLog(@"[MLEQ] Bound audioTapProcessor to asset track (%d)", (int)track.trackID);
+	}
 
-		AVMutableAudioMixInputParameters *p0 = [AVMutableAudioMixInputParameters audioMixInputParameters];
-		p0.trackID = kCMPersistentTrackID_Invalid; // 0
-		p0.audioTapProcessor = tap;
-		[inputParamsArray addObject:p0];
+	// Always bind trackID = 1 and trackID = kCMPersistentTrackID_Invalid (0) for elementary ADTS streams
+	AVMutableAudioMixInputParameters *p1 = [AVMutableAudioMixInputParameters audioMixInputParameters];
+	p1.trackID = 1;
+	p1.audioTapProcessor = tap;
+	[inputParamsArray addObject:p1];
 
-		for (AVPlayerItemTrack *it in playerItem.tracks) {
-			if (it.assetTrack && it.assetTrack.trackID != 1 && it.assetTrack.trackID != 0) {
-				AVMutableAudioMixInputParameters *pit = [AVMutableAudioMixInputParameters audioMixInputParametersWithTrack:it.assetTrack];
-				pit.audioTapProcessor = tap;
-				[inputParamsArray addObject:pit];
-			}
+	AVMutableAudioMixInputParameters *p0 = [AVMutableAudioMixInputParameters audioMixInputParameters];
+	p0.trackID = kCMPersistentTrackID_Invalid; // 0
+	p0.audioTapProcessor = tap;
+	[inputParamsArray addObject:p0];
+
+	for (AVPlayerItemTrack *it in playerItem.tracks) {
+		if (it.assetTrack && it.assetTrack.trackID != 1 && it.assetTrack.trackID != 0) {
+			AVMutableAudioMixInputParameters *pit = [AVMutableAudioMixInputParameters audioMixInputParametersWithTrack:it.assetTrack];
+			pit.audioTapProcessor = tap;
+			[inputParamsArray addObject:pit];
 		}
-		NSLog(@"[MLEQ] Successfully attached 10-band vDSP audio tap processor with fallback parameters");
 	}
 
 	AVMutableAudioMix *audioMix = [AVMutableAudioMix audioMix];
 	audioMix.inputParameters = inputParamsArray;
 	playerItem.audioMix = audioMix;
+
+	// Retain tap in manager so it is never deallocated prematurely during playback
+	[_lock lock];
+	if (!_activeTaps) {
+		_activeTaps = [[NSMutableArray alloc] init];
+	}
+	[_activeTaps addObject:(__bridge id)tap];
+	while (_activeTaps.count > 4) {
+		[_activeTaps removeObjectAtIndex:0];
+	}
+	[_lock unlock];
+
+	NSLog(@"[MLEQ] Successfully assigned audioMix with %lu inputParameters to playerItem (tap=%p)",
+	      (unsigned long)inputParamsArray.count, tap);
 
 	CFRelease(tap);
 }
